@@ -232,20 +232,23 @@ with st.sidebar:
     st.session_state._filter_classes = sel_classes
     st.session_state._filter_affils = sel_affils
 
-    with st.expander("Advanced: custom rosters"):
-        heroes_text = st.text_area("Heroes (one per line)", value="\\n".join(st.session_state.heroes), height=180)
-        gods_text = st.text_area("Gods (one per line)", value="\\n".join(st.session_state.gods), height=100)
-        if st.button("Apply Lists / Reset Draft", type="primary"):
-            new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
-            new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
-            st.session_state.heroes = new_heroes or DEFAULT_HEROES.copy()
-            st.session_state.gods = new_gods or DEFAULT_GODS.copy()
-            # Rebuild DB with defaults for new heroes
-            global HERO_DB, ALL_CLASSES, ALL_AFFILIATIONS
-            HERO_DB = {h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in st.session_state.heroes}
-            ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
-            ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
-            reset_draft()
+with st.expander("Advanced: custom rosters"):
+    heroes_text = st.text_area("Heroes (one per line)", value="\\n".join(st.session_state.heroes), height=180)
+    gods_text = st.text_area("Gods (one per line)", value="\\n".join(st.session_state.gods), height=100)
+
+    if st.button("Apply Lists / Reset Draft", type="primary"):
+        global HERO_DB, ALL_CLASSES, ALL_AFFILIATIONS   # <-- move this to here!
+
+        new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
+        new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
+        st.session_state.heroes = new_heroes or DEFAULT_HEROES.copy()
+        st.session_state.gods = new_gods or DEFAULT_GODS.copy()
+
+        # Rebuild DB with defaults for new heroes
+        HERO_DB = {h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in st.session_state.heroes}
+        ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
+        ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
+        reset_draft()
 
     st.markdown("---")
     st.subheader("Actions")
