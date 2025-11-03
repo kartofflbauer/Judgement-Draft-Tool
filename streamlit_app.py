@@ -309,7 +309,7 @@ def render_hero_chip(hname: str):
     with col_text:
         classes = ", ".join(meta.classes) if meta.classes else "—"
         affils = ", ".join(meta.affiliations) if meta.affiliations else "—"
-        st.markdown(f"**{hname}**
+        st.markdown(f"**{hname}**\\n\\nClasses: {classes}  |  Affil: {affils}")
 
 Classes: {classes}  |  Affil: {affils}")
 
