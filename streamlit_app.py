@@ -437,7 +437,8 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
         if confirm and choice:
             ok = apply_action(step, choice)
             if ok:
-                st.success(f"{step.player} {step.kind}ed {choice}")
+                st.toast(f"{step.player} {step.kind}ed {choice}", icon="✅")
+                st.rerun()  # jump straight to the next step
 
     elif step.kind == 'god':
         available_gods = st.session_state.gods.copy()
@@ -449,10 +450,12 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
         if confirm and choice:
             if st.session_state.get('_enforce_unique_gods', True):
                 if choice not in st.session_state.available_gods:
+                    picked = [g for g in st.session_state.gods_picked.values() if g]
                     st.session_state.available_gods = [g for g in st.session_state.gods if g not in picked]
             ok = apply_action(step, choice)
             if ok:
-                st.success(f"{step.player} picked {choice}")
+                st.toast(f"{step.player} picked {choice}", icon="✅")
+                st.rerun()  # jump straight to the next step
 else:
     st.header("Draft Complete ✅")
 
