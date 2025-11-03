@@ -15,15 +15,47 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional
 
 import streamlit as st
+import numpy as np
 
 # -----------------------
 # Defaults (edit freely)
 # -----------------------
-DEFAULT_HEROES = [f"Hero {i+1}" for i in range(53)]
-DEFAULT_GODS = [f"God {i+1}" for i in range(6)]
+DEFAULT_HEROES = [
+    "Abothas","Allandir","Aria","Asbrand","Aschell","Bale & Sarna","Barnascus","Bastian","Brok","Carva",
+    "Cradol","Doenregar","Drelgoth","Fazeal","Gendris","Grael","Haksa","Isabel","Istariel","Jaegar",
+    "Kain","Kogan","Kruul","Kvarto","Loribela","Lugdrug","Maltique","Marcus","Masuzi","Naias",
+    "Nephenee","Onkura","Piper","Rakkir","Ramona","Ravenos","Saiyin","Sharn","Skoll","Skye",
+    "Styx","Svetlana","Thorgar","Thrommel","Urvexis","Viktor","Xyvera","Yasmin","Yorgawth","Zaffen",
+    "Zaron","Zhim'gigrak","Zhonyja"
+]
+DEFAULT_GODS = ["Bruelin","Grul","Ista","Krognar","Tomas","Torin"]
 
 # Allow same god for both teams? Set to False to enforce uniqueness.
 ALLOW_DUPLICATE_GODS = False
+
+# -----------------------
+# Lightweight Data Model
+# -----------------------
+@dataclass
+class HeroMeta:
+    name: str
+    classes: List[str]
+    affiliations: List[str]  # two gods OR ["avatar"]
+
+# Build a basic DB with blank data (classes=[]; affiliations=["avatar"]).
+HERO_DB: Dict[str, HeroMeta] = {
+    h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in DEFAULT_HEROES
+}
+
+ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
+if not ALL_CLASSES:
+    ALL_CLASSES = []  # none yet
+ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
+
+# Placeholder portrait (128x128 black square)
+def get_placeholder_portrait():
+    img = np.zeros((128,128,3), dtype=np.uint8)
+    return img
 
 @dataclass
 class Step:
@@ -182,27 +214,40 @@ def export_state() -> str:
 # UI
 # -----------------------
 
-st.set_page_config(page_title="MOBA Draft Tool", page_icon="🎮", layout="wide")
+st.set_page_config(page_title="Judgement: Eternal Champions Draft Tool", page_icon=None, layout="wide")
 init_state()
 
 with st.sidebar:
     st.header("⚙️ Setup")
-    st.caption("Paste your own lists (one per line) and click Apply.")
-    heroes_text = st.text_area("Heroes (one per line)", value='\n'.join(st.session_state.heroes), height=180)
-    gods_text = st.text_area("Gods (one per line)", value='\n'.join(st.session_state.gods), height=100)
-    enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=(not ALLOW_DUPLICATE_GODS))
-    if enforce_unique == ALLOW_DUPLICATE_GODS:
-        # If user toggles, reflect in runtime toggle only (not module constant)
-        st.session_state._enforce_unique_gods = enforce_unique
-    else:
-        st.session_state._enforce_unique_gods = enforce_unique
+    st.caption("Using built-in heroes & gods. You can still override below if needed.")
 
-    if st.button("Apply Lists / Reset Draft", type="primary"):
-        new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
-        new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
-        st.session_state.heroes = new_heroes or DEFAULT_HEROES.copy()
-        st.session_state.gods = new_gods or DEFAULT_GODS.copy()
-        reset_draft()
+    enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=True)
+    st.session_state._enforce_unique_gods = enforce_unique
+
+    # Filters
+    st.markdown("---")
+    st.subheader("Filters")
+    sel_classes = st.multiselect("Classes", options=ALL_CLASSES, default=[])
+    sel_affils = st.multiselect("Affiliations", options=sorted(set(ALL_AFFILIATIONS + ["avatar"])), default=[])
+    st.session_state._filter_classes = sel_classes
+    st.session_state._filter_affils = sel_affils
+
+    with st.expander("Advanced: custom rosters"):
+        heroes_text = st.text_area("Heroes (one per line)", value='
+'.join(st.session_state.heroes), height=180)
+        gods_text = st.text_area("Gods (one per line)", value='
+'.join(st.session_state.gods), height=100)
+        if st.button("Apply Lists / Reset Draft", type="primary"):
+            new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
+            new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
+            st.session_state.heroes = new_heroes or DEFAULT_HEROES.copy()
+            st.session_state.gods = new_gods or DEFAULT_GODS.copy()
+            # Rebuild DB with defaults for new heroes
+            global HERO_DB, ALL_CLASSES, ALL_AFFILIATIONS
+            HERO_DB = {h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in st.session_state.heroes}
+            ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
+            ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
+            reset_draft()
 
     st.markdown("---")
     st.subheader("Actions")
@@ -219,9 +264,8 @@ with st.sidebar:
     export_str = export_state()
     st.download_button("Download Draft JSON", data=export_str, file_name="draft_state.json", mime="application/json")
 
-
 # Header / Overview
-st.title("🎮 MOBA 5v5 Drafting Tool")
+st.title("Judgement: Eternal Champions Draft Tool")
 
 left, mid, right = st.columns([1.2, 1, 1])
 
@@ -234,7 +278,11 @@ with left:
 with mid:
     st.subheader("Player 1")
     st.markdown("**Picks**")
-    st.write(", ".join(st.session_state.picks['P1']) or "—")
+    if st.session_state.picks['P1']:
+        for h in st.session_state.picks['P1']:
+            render_hero_chip(h)
+    else:
+        st.write("—")
     st.markdown("**God**")
     st.write(st.session_state.gods_picked['P1'] or "—")
     st.markdown("**Bans**")
@@ -243,21 +291,47 @@ with mid:
 with right:
     st.subheader("Player 2")
     st.markdown("**Picks**")
-    st.write(", ".join(st.session_state.picks['P2']) or "—")
+    if st.session_state.picks['P2']:
+        for h in st.session_state.picks['P2']:
+            render_hero_chip(h)
+    else:
+        st.write("—")
     st.markdown("**God**")
     st.write(st.session_state.gods_picked['P2'] or "—")
 
 st.markdown("---")
 
 # Current Step Interaction
+# Helper to render a hero chip with portrait + tags
+def render_hero_chip(hname: str):
+    meta = HERO_DB.get(hname, HeroMeta(hname, [], ["avatar"]))
+    col_img, col_text = st.columns([1,3])
+    with col_img:
+        st.image(get_placeholder_portrait(), width=48)
+    with col_text:
+        classes = ", ".join(meta.classes) if meta.classes else "—"
+        affils = ", ".join(meta.affiliations) if meta.affiliations else "—"
+        st.markdown(f"**{hname}**
+
+Classes: {classes}  |  Affil: {affils}")
+
 if st.session_state.step_idx < len(DRAFT_SEQUENCE):
     step = DRAFT_SEQUENCE[st.session_state.step_idx]
     st.header(step.label)
 
+    # Compute filtered choices for heroes
+    def hero_passes_filters(h: str) -> bool:
+        meta = HERO_DB.get(h, HeroMeta(h, [], ["avatar"]))
+        cls_ok = True if not st.session_state._filter_classes else any(c in st.session_state._filter_classes for c in meta.classes)
+        aff_ok = True if not st.session_state._filter_affils else any(a in st.session_state._filter_affils for a in meta.affiliations)
+        return cls_ok and aff_ok
+
     if step.kind in ('ban','pick'):
-        # Filter choices: available heroes; for clarity, show banned heroes struck? Keep simple.
-        options = st.session_state.available_heroes.copy()
+        base_opts = st.session_state.available_heroes.copy()
+        options = [h for h in base_opts if hero_passes_filters(h)]
         choice = st.selectbox("Choose a hero:", options, index=0 if options else None, key=f"select_{st.session_state.step_idx}")
+        if choice:
+            render_hero_chip(choice)
         confirm = st.button("Confirm", type="primary")
         if confirm and choice:
             ok = apply_action(step, choice)
@@ -267,14 +341,12 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
     elif step.kind == 'god':
         # Available gods (enforce uniqueness based on sidebar toggle)
         available_gods = st.session_state.gods.copy()
-        # Recompute availability considering picked gods and uniqueness toggle
         picked = [g for g in st.session_state.gods_picked.values() if g]
         if st.session_state.get('_enforce_unique_gods', True):
             available_gods = [g for g in available_gods if g not in picked]
         choice = st.selectbox("Choose a god:", available_gods, index=0 if available_gods else None, key=f"god_{st.session_state.step_idx}")
         confirm = st.button("Confirm God", type="primary")
         if confirm and choice:
-            # Temporarily adjust available_gods if uniqueness is enforced
             if st.session_state.get('_enforce_unique_gods', True):
                 if choice not in st.session_state.available_gods:
                     st.session_state.available_gods = [g for g in st.session_state.gods if g not in picked]
@@ -297,5 +369,3 @@ else:
     st.markdown("---")
     st.subheader("Summary JSON")
     st.code(export_state(), language='json')
-
-
