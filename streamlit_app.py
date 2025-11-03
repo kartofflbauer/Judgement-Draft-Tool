@@ -6,6 +6,8 @@
 #   2) streamlit run streamlit_app.py
 
 import json
+import csv
+from io import StringIO
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 
@@ -29,23 +31,80 @@ DEFAULT_GODS = ["Bruelin","Grul","Ista","Krognar","Tomas","Torin"]
 ALLOW_DUPLICATE_GODS = False
 
 # -----------------------
+# Preloaded CSV (classes & affiliations) — corrected & canonicalized
+# -----------------------
+PRELOAD_AFFILIATIONS_CSV = """name,classes,affiliations
+Abothas,"Controller;Shooter","Krognar;Torin"
+Allandir,"Shooter","Ista;Torin"
+Aria,"Controller;Shooter","Grul;Torin"
+Asbrand,"Enhancer;Tank","Bruelin;Avatar"
+Aschell,"Shooter","Tomas;Torin"
+Bale & Sarna,"Bruiser;Soulist","Bruelin;Grul"
+Barnascus,"Bruiser;Shooter","Bruelin;Ista"
+Bastian,"Enhancer","Torin;Avatar"
+Brok,"Bruiser","Ista;Bruelin"
+Carva,"Controller;Tank","Grul;Avatar"
+Cradol,"Bruiser;Enhancer","Bruelin;Krognar"
+Doenregar,"Tank","Grul;Ista"
+Drelgoth,"Bruiser","Bruelin;Grul"
+Fazeal,"Assassin;Controller","Tomas;Avatar"
+Gendris,"Controller;Shooter","Grul;Avatar"
+Grael,"Enhancer;Soulist","Krognar;Torin"
+Haksa,"Controller;Enhancer","Ista;Torin"
+Isabel,"Bruiser;Enhancer","Ista;Avatar"
+Istariel,"Sniper","Ista;Torin"
+Jaegar,"Controller;Shooter","Torin;Krognar"
+Kain,"Bruiser;Shooter","Krognar;Tomas"
+Kogan,"Bruiser;Shooter","Krognar;Bruelin"
+Kruul,"Bruiser;Soulist","Bruelin;Krognar"
+Kvarto,"Bruiser;Controller","Bruelin;Krognar"
+Loribela,"Controller;Enhancer","Ista;Grul"
+Lugdrug,"Enhancer;Tank","Bruelin;Krognar"
+Maltique,"Controller;Sniper","ALL"
+Marcus,"Controller;Tank","Ista;Tomas"
+Masuzi,"Controller;Soulist","Tomas;Torin"
+Naias,"Controller;Soulist","Krognar;Torin"
+Nephenee,"Assassin","Ista;Tomas"
+Onkura,"Controller;Tank","Tomas;Torin"
+Piper,"Bruiser;Shooter","Krognar;Grul"
+Rakkir,"Assassin","Tomas;Krognar"
+Ramona,"Controller;Enhancer","Grul;Krognar"
+Ravenos,"Controller;Tank","Torin;Tomas"
+Saiyin,"Enhancer;Soulist","Ista;Tomas"
+Sharn,"Bruiser;Tank","Tomas;Grul"
+Skoll,"Bruiser;Tank","Krognar;Bruelin"
+Skye,"Bruiser;Enhancer","Tomas;Torin"
+Styx,"Controller;Soulist","Torin;Krognar"
+Svetlana,"Controller;Soulist","Grul;Ista"
+Thorgar,"Bruiser","Grul;Bruelin"
+Thrommel,"Bruiser;Tank","Ista;Torin"
+Urvexis,"Assassin","Torin;Avatar"
+Viktor,"Controller;Shooter","Krognar;Tomas"
+Xyvera,"Controller;Soulist","Torin;Grul"
+Yasmin,"Enhancer;Shooter","Ista;Bruelin"
+Yorgawth,"Bruiser","Grul;Krognar"
+Zaffen,"Sniper","Grul;Bruelin"
+Zaron,"Controller;Soulist","Krognar;Avatar"
+Zhim'gigrak,"Controller;Shooter","Tomas;Torin"
+Zhonyja,"Assassin","Bruelin;Avatar"
+"""
+
+# -----------------------
 # Lightweight Data Model
 # -----------------------
 @dataclass
 class HeroMeta:
     name: str
     classes: List[str]
-    affiliations: List[str]  # two gods OR ["avatar"]
+    affiliations: List[str]  # two gods OR ["Avatar"]
 
-# Build a basic DB with blank data (classes=[]; affiliations=["avatar"]).
+# Build DB defaults (classes=[]; affiliations=["Avatar"])
 HERO_DB: Dict[str, HeroMeta] = {
-    h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in DEFAULT_HEROES
+    h: HeroMeta(name=h, classes=[], affiliations=["Avatar"]) for h in DEFAULT_HEROES
 }
 
-ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
-if not ALL_CLASSES:
-    ALL_CLASSES = []  # none yet
-ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
+ALL_CLASSES: List[str] = []
+ALL_AFFILIATIONS: List[str] = []
 
 # Placeholder portrait (128x128 black square)
 def get_placeholder_portrait():
@@ -87,6 +146,63 @@ DRAFT_SEQUENCE: List[Step] = [
     Step('god','P1','Player 1 Pick God'),
     Step('god','P2','Player 2 Pick God'),
 ]
+
+# -----------------------
+# Helpers to load CSV into HERO_DB
+# -----------------------
+def _split_semis(s: str) -> List[str]:
+    return [x.strip() for x in s.split(';') if x.strip()]
+
+def _normalize_affils(affils: List[str]) -> List[str]:
+    """Keep 'Avatar' capitalized; expand 'ALL' to all gods; canonicalize known gods."""
+    norm: List[str] = []
+    for a in affils:
+        a_clean = a.strip().strip('"').strip("'")
+        if not a_clean:
+            continue
+        if a_clean.upper() == "ALL":
+            norm.extend(DEFAULT_GODS)
+            continue
+        if a_clean.lower() == "avatar":
+            norm.append("Avatar")
+            continue
+        # Canonicalize to exact god names
+        for g in DEFAULT_GODS:
+            if a_clean.lower() == g.lower():
+                a_clean = g
+                break
+        norm.append(a_clean)
+    # dedupe preserving order
+    seen = set()
+    out = []
+    for x in norm:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+def load_preloaded_meta():
+    """Parse PRELOAD_AFFILIATIONS_CSV and update HERO_DB, ALL_CLASSES, ALL_AFFILIATIONS."""
+    reader = csv.DictReader(StringIO(PRELOAD_AFFILIATIONS_CSV))
+    updates: Dict[str, HeroMeta] = {}
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name or name not in HERO_DB:
+            continue
+        classes_raw = (row.get("classes") or "").strip()
+        affils_raw = (row.get("affiliations") or "").strip()
+        classes = _split_semis(classes_raw)
+        affils = _normalize_affils(_split_semis(affils_raw))
+        updates[name] = HeroMeta(name=name, classes=classes, affiliations=affils or ["Avatar"])
+
+    # apply updates
+    for k, v in updates.items():
+        HERO_DB[k] = v
+
+    # recompute filters
+    global ALL_CLASSES, ALL_AFFILIATIONS
+    ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
+    ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
 
 # -----------------------
 # Session State Helpers
@@ -137,9 +253,6 @@ def apply_action(step: Step, choice: str):
         if choice not in st.session_state.available_gods:
             st.toast("That god is not available.", icon="⚠️")
             return False
-        if not ALLOW_DUPLICATE_GODS:
-            # If other team already picked this god, it won't be in available_gods anyway
-            pass
 
     # Apply
     record = {'step_idx': st.session_state.step_idx, 'step': step.__dict__, 'choice': choice}
@@ -200,29 +313,33 @@ def export_state() -> str:
         'gods': st.session_state.gods_picked,
         'remaining_heroes': st.session_state.available_heroes,
         'remaining_gods': st.session_state.available_gods,
+        'hero_meta': {k: {'classes': v.classes, 'affiliations': v.affiliations} for k, v in HERO_DB.items()},
     }
     return json.dumps(payload, indent=2)
 
 # Helper to render a hero chip with portrait + tags
 def render_hero_chip(hname: str):
-    meta = HERO_DB.get(hname, HeroMeta(hname, [], ["avatar"]))
+    meta = HERO_DB.get(hname, HeroMeta(hname, [], ["Avatar"]))
     col_img, col_text = st.columns([1, 3])
     with col_img:
         st.image(get_placeholder_portrait(), width=48)
     with col_text:
         classes = ", ".join(meta.classes) if meta.classes else "—"
         affils = ", ".join(meta.affiliations) if meta.affiliations else "—"
-        st.markdown(f"**{hname}**\n\nClasses: {classes}  |  Affil: {affils}")
+        st.markdown(f"""**{hname}**
+
+Classes: {classes}  |  Affil: {affils}""")
 
 # -----------------------
 # UI
 # -----------------------
 st.set_page_config(page_title="Judgement: Eternal Champions Draft Tool", page_icon=None, layout="wide")
 init_state()
+load_preloaded_meta()  # <- apply CSV every run so meta is always present
 
 with st.sidebar:
     st.header("⚙️ Setup")
-    st.caption("Using built-in heroes & gods. You can still override below if needed.")
+    st.caption("Built-in heroes, classes, and affiliations are loaded.")
 
     enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=True)
     st.session_state._enforce_unique_gods = enforce_unique
@@ -231,7 +348,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Filters")
     sel_classes = st.multiselect("Classes", options=ALL_CLASSES, default=st.session_state._filter_classes)
-    sel_affils = st.multiselect("Affiliations", options=sorted(set(ALL_AFFILIATIONS + ["avatar"])), default=st.session_state._filter_affils)
+    sel_affils = st.multiselect("Affiliations", options=sorted(set(ALL_AFFILIATIONS)), default=st.session_state._filter_affils)
     st.session_state._filter_classes = sel_classes
     st.session_state._filter_affils = sel_affils
 
@@ -249,24 +366,6 @@ with st.sidebar:
     st.subheader("Export")
     export_str = export_state()
     st.download_button("Download Draft JSON", data=export_str, file_name="draft_state.json", mime="application/json")
-
-# Optional: Advanced roster overrides (outside the sidebar, as an expander)
-with st.expander("Advanced: custom rosters"):
-    heroes_text = st.text_area("Heroes (one per line)", value="\n".join(st.session_state.heroes), height=180)
-    gods_text = st.text_area("Gods (one per line)", value="\n".join(st.session_state.gods), height=100)
-
-    if st.button("Apply Lists / Reset Draft", type="primary"):
-        # NOTE: No 'global' needed at module scope
-        new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
-        new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
-        st.session_state.heroes = new_heroes or DEFAULT_HEROES.copy()
-        st.session_state.gods = new_gods or DEFAULT_GODS.copy()
-
-        # Rebuild DB with defaults for new heroes
-        HERO_DB = {h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in st.session_state.heroes}
-        ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
-        ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
-        reset_draft()
 
 # Header / Overview
 st.title("Judgement: Eternal Champions Draft Tool")
@@ -312,7 +411,7 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
 
     # Compute filtered choices for heroes
     def hero_passes_filters(h: str) -> bool:
-        meta = HERO_DB.get(h, HeroMeta(h, [], ["avatar"]))
+        meta = HERO_DB.get(h, HeroMeta(h, [], ["Avatar"]))
         cls_ok = True if not st.session_state._filter_classes else any(c in st.session_state._filter_classes for c in meta.classes)
         aff_ok = True if not st.session_state._filter_affils else any(a in st.session_state._filter_affils for a in meta.affiliations)
         return cls_ok and aff_ok
@@ -330,7 +429,6 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
                 st.success(f"{step.player} {step.kind}ed {choice}")
 
     elif step.kind == 'god':
-        # Available gods (enforce uniqueness based on sidebar toggle)
         available_gods = st.session_state.gods.copy()
         picked = [g for g in st.session_state.gods_picked.values() if g]
         if st.session_state.get('_enforce_unique_gods', True):
