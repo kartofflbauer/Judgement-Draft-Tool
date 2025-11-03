@@ -1,14 +1,9 @@
 # streamlit_app.py
 # -----------------
-# MOBA 5v5 Drafting Tool (Picks, Bans, and God selection)
+# Judgement: Eternal Champions Draft Tool (Picks, Bans, and God selection)
 # Usage:
 #   1) pip install streamlit
 #   2) streamlit run streamlit_app.py
-#
-# Customize HEROES and GODS with your actual names below or paste lists via the sidebar.
-# The sequence matches the one you provided exactly. It enforces no duplicate heroes,
-# prevents picking banned heroes, and (by default) makes gods unique per team.
-# Includes Undo, Reset, and Export JSON.
 
 import json
 from dataclasses import dataclass
@@ -54,7 +49,7 @@ ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
 
 # Placeholder portrait (128x128 black square)
 def get_placeholder_portrait():
-    img = np.zeros((128,128,3), dtype=np.uint8)
+    img = np.zeros((128, 128, 3), dtype=np.uint8)
     return img
 
 @dataclass
@@ -96,7 +91,6 @@ DRAFT_SEQUENCE: List[Step] = [
 # -----------------------
 # Session State Helpers
 # -----------------------
-
 def init_state():
     if 'heroes' not in st.session_state:
         st.session_state.heroes = DEFAULT_HEROES.copy()
@@ -116,7 +110,10 @@ def init_state():
         st.session_state.step_idx = 0
     if 'history' not in st.session_state:
         st.session_state.history: List[dict] = []  # action log for Undo
-
+    if '_filter_classes' not in st.session_state:
+        st.session_state._filter_classes = []
+    if '_filter_affils' not in st.session_state:
+        st.session_state._filter_affils = []
 
 def reset_draft():
     st.session_state.available_heroes = st.session_state.heroes.copy()
@@ -126,7 +123,6 @@ def reset_draft():
     st.session_state.gods_picked = {'P1': None, 'P2': None}
     st.session_state.step_idx = 0
     st.session_state.history = []
-
 
 def apply_action(step: Step, choice: str):
     # Validate
@@ -166,7 +162,6 @@ def apply_action(step: Step, choice: str):
     st.session_state.step_idx += 1
     return True
 
-
 def undo_last():
     if not st.session_state.history:
         st.toast("Nothing to undo.", icon="ℹ️")
@@ -197,7 +192,6 @@ def undo_last():
 
     st.session_state.step_idx = record['step_idx']
 
-
 def export_state() -> str:
     payload = {
         'sequence': [s.__dict__ for s in DRAFT_SEQUENCE],
@@ -209,11 +203,20 @@ def export_state() -> str:
     }
     return json.dumps(payload, indent=2)
 
+# Helper to render a hero chip with portrait + tags
+def render_hero_chip(hname: str):
+    meta = HERO_DB.get(hname, HeroMeta(hname, [], ["avatar"]))
+    col_img, col_text = st.columns([1, 3])
+    with col_img:
+        st.image(get_placeholder_portrait(), width=48)
+    with col_text:
+        classes = ", ".join(meta.classes) if meta.classes else "—"
+        affils = ", ".join(meta.affiliations) if meta.affiliations else "—"
+        st.markdown(f"**{hname}**\\n\\nClasses: {classes}  |  Affil: {affils}")
 
 # -----------------------
 # UI
 # -----------------------
-
 st.set_page_config(page_title="Judgement: Eternal Champions Draft Tool", page_icon=None, layout="wide")
 init_state()
 
@@ -227,28 +230,10 @@ with st.sidebar:
     # Filters
     st.markdown("---")
     st.subheader("Filters")
-    sel_classes = st.multiselect("Classes", options=ALL_CLASSES, default=[])
-    sel_affils = st.multiselect("Affiliations", options=sorted(set(ALL_AFFILIATIONS + ["avatar"])), default=[])
+    sel_classes = st.multiselect("Classes", options=ALL_CLASSES, default=st.session_state._filter_classes)
+    sel_affils = st.multiselect("Affiliations", options=sorted(set(ALL_AFFILIATIONS + ["avatar"])), default=st.session_state._filter_affils)
     st.session_state._filter_classes = sel_classes
     st.session_state._filter_affils = sel_affils
-
-with st.expander("Advanced: custom rosters"):
-    heroes_text = st.text_area("Heroes (one per line)", value="\\n".join(st.session_state.heroes), height=180)
-    gods_text = st.text_area("Gods (one per line)", value="\\n".join(st.session_state.gods), height=100)
-
-    if st.button("Apply Lists / Reset Draft", type="primary"):
-        global HERO_DB, ALL_CLASSES, ALL_AFFILIATIONS   # <-- move this to here!
-
-        new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
-        new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
-        st.session_state.heroes = new_heroes or DEFAULT_HEROES.copy()
-        st.session_state.gods = new_gods or DEFAULT_GODS.copy()
-
-        # Rebuild DB with defaults for new heroes
-        HERO_DB = {h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in st.session_state.heroes}
-        ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
-        ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
-        reset_draft()
 
     st.markdown("---")
     st.subheader("Actions")
@@ -264,6 +249,24 @@ with st.expander("Advanced: custom rosters"):
     st.subheader("Export")
     export_str = export_state()
     st.download_button("Download Draft JSON", data=export_str, file_name="draft_state.json", mime="application/json")
+
+# Optional: Advanced roster overrides (outside the sidebar, as an expander)
+with st.expander("Advanced: custom rosters"):
+    heroes_text = st.text_area("Heroes (one per line)", value="\n".join(st.session_state.heroes), height=180)
+    gods_text = st.text_area("Gods (one per line)", value="\n".join(st.session_state.gods), height=100)
+
+    if st.button("Apply Lists / Reset Draft", type="primary"):
+        # NOTE: No 'global' needed at module scope
+        new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
+        new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
+        st.session_state.heroes = new_heroes or DEFAULT_HEROES.copy()
+        st.session_state.gods = new_gods or DEFAULT_GODS.copy()
+
+        # Rebuild DB with defaults for new heroes
+        HERO_DB = {h: HeroMeta(name=h, classes=[], affiliations=["avatar"]) for h in st.session_state.heroes}
+        ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
+        ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
+        reset_draft()
 
 # Header / Overview
 st.title("Judgement: Eternal Champions Draft Tool")
@@ -303,17 +306,6 @@ with right:
 st.markdown("---")
 
 # Current Step Interaction
-# Helper to render a hero chip with portrait + tags
-def render_hero_chip(hname: str):
-    meta = HERO_DB.get(hname, HeroMeta(hname, [], ["avatar"]))
-    col_img, col_text = st.columns([1,3])
-    with col_img:
-        st.image(get_placeholder_portrait(), width=48)
-    with col_text:
-        classes = ", ".join(meta.classes) if meta.classes else "—"
-        affils = ", ".join(meta.affiliations) if meta.affiliations else "—"
-        st.markdown(f"**{hname}**\\n\\nClasses: {classes}  |  Affil: {affils}")
-
 if st.session_state.step_idx < len(DRAFT_SEQUENCE):
     step = DRAFT_SEQUENCE[st.session_state.step_idx]
     st.header(step.label)
