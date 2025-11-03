@@ -306,16 +306,27 @@ def undo_last():
     st.session_state.step_idx = record['step_idx']
 
 def export_state() -> str:
-    payload = {
-        'sequence': [s.__dict__ for s in DRAFT_SEQUENCE],
-        'bans': st.session_state.bans,
-        'picks': st.session_state.picks,
-        'gods': st.session_state.gods_picked,
-        'remaining_heroes': st.session_state.available_heroes,
-        'remaining_gods': st.session_state.available_gods,
-        'hero_meta': {k: {'classes': v.classes, 'affiliations': v.affiliations} for k, v in HERO_DB.items()},
+    """
+    Export a clean summary of the draft:
+      - bans in order of banning
+      - each player's warband (pick order)
+      - each player's picked god
+      - remaining heroes
+    """
+    all_picked = st.session_state.picks['P1'] + st.session_state.picks['P2']
+    all_banned = st.session_state.bans
+    remaining = [h for h in st.session_state.heroes if h not in all_picked and h not in all_banned]
+
+    summary = {
+        "bans": all_banned,
+        "warband_P1": st.session_state.picks['P1'],
+        "god_P1": st.session_state.gods_picked.get('P1'),
+        "warband_P2": st.session_state.picks['P2'],
+        "god_P2": st.session_state.gods_picked.get('P2'),
+        "remaining_heroes": remaining
     }
-    return json.dumps(payload, indent=2)
+
+    return json.dumps(summary, indent=2)
 
 # Helper to render a hero chip with portrait + tags
 def render_hero_chip(hname: str):
