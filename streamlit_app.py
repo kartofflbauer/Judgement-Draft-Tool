@@ -311,8 +311,6 @@ def render_hero_chip(hname: str):
         affils = ", ".join(meta.affiliations) if meta.affiliations else "—"
         st.markdown(f"**{hname}**\\n\\nClasses: {classes}  |  Affil: {affils}")
 
-Classes: {classes}  |  Affil: {affils}")
-
 if st.session_state.step_idx < len(DRAFT_SEQUENCE):
     step = DRAFT_SEQUENCE[st.session_state.step_idx]
     st.header(step.label)
