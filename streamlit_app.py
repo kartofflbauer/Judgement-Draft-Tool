@@ -233,10 +233,8 @@ with st.sidebar:
     st.session_state._filter_affils = sel_affils
 
     with st.expander("Advanced: custom rosters"):
-        heroes_text = st.text_area("Heroes (one per line)", value='
-'.join(st.session_state.heroes), height=180)
-        gods_text = st.text_area("Gods (one per line)", value='
-'.join(st.session_state.gods), height=100)
+        heroes_text = st.text_area("Heroes (one per line)", value="\\n".join(st.session_state.heroes), height=180)
+        gods_text = st.text_area("Gods (one per line)", value="\\n".join(st.session_state.gods), height=100)
         if st.button("Apply Lists / Reset Draft", type="primary"):
             new_heroes = [h.strip() for h in heroes_text.splitlines() if h.strip()]
             new_gods = [g.strip() for g in gods_text.splitlines() if g.strip()]
