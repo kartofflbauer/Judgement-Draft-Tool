@@ -2,7 +2,7 @@
 # -----------------
 # Judgement: Eternal Champions Draft Tool (Picks, Bans, God selection)
 # Usage:
-#   1) pip install streamlit pillow numpy
+#   1) pip install streamlit pillow numpy supabase
 #   2) streamlit run streamlit_app.py
 
 import os
@@ -16,6 +16,9 @@ from typing import List, Dict, Optional
 import streamlit as st
 import numpy as np
 from PIL import Image
+
+from supabase import create_client, Client
+import time
 
 # -----------------------
 # Defaults (edit freely)
@@ -102,9 +105,7 @@ class HeroMeta:
     affiliations: List[str]  # two gods OR ["Avatar"]
 
 # Build DB defaults (classes=[]; affiliations=["Avatar"])
-HERO_DB: Dict[str, HeroMeta] = {
-    h: HeroMeta(name=h, classes=[], affiliations=["Avatar"]) for h in DEFAULT_HEROES
-}
+HERO_DB: Dict[str, HeroMeta] = {h: HeroMeta(name=h, classes=[], affiliations=["Avatar"]) for h in DEFAULT_HEROES}
 ALL_CLASSES: List[str] = []
 ALL_AFFILIATIONS: List[str] = []
 
@@ -145,9 +146,11 @@ def hero_image_path(name: str) -> Optional[str]:
     return _find_image(HERO_IMG_DIR, "avatar_" + _slug_nopunct(name))
 
 def god_image_path(name: str) -> Optional[str]:
-    stem = _slug_nopunct(name) + "-logo"
+    # Match your convention first: "avatar-<god>"
+    stem = "avatar-" + _slug_nopunct(name)
     p = _find_image(GOD_IMG_DIR, stem)
     if p: return p
+    # Fallback: plain slug
     return _find_image(GOD_IMG_DIR, _slug_nopunct(name))
 
 @st.cache_data(show_spinner=False)
@@ -164,16 +167,13 @@ def load_image_bytes(path: Optional[str]) -> Optional[bytes]:
 def grayscale_bytes(img_bytes: bytes) -> Optional[bytes]:
     try:
         im = Image.open(BytesIO(img_bytes)).convert("RGB")
-        gray = Image.fromarray(
-            np.stack([np.array(im.convert("L"))]*3, axis=-1).astype(np.uint8)
-        )
+        gray = Image.fromarray(np.stack([np.array(im.convert("L"))]*3, axis=-1).astype(np.uint8))
         out = BytesIO()
         gray.save(out, format="PNG")
         return out.getvalue()
     except Exception:
         return None
 
-# Placeholder portrait (128x128 black square)
 def get_placeholder_portrait():
     img = np.zeros((128, 128, 3), dtype=np.uint8)
     return img
@@ -255,6 +255,58 @@ def load_preloaded_meta():
     ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
     ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
 
+# -------- Supabase adapter --------
+def _sb_client() -> Client:
+    url = st.secrets.get("SUPABASE_URL")
+    key = st.secrets.get("SUPABASE_ANON_KEY")
+    if not url or not key:
+        st.error("Supabase secrets missing. Add SUPABASE_URL and SUPABASE_ANON_KEY to Streamlit secrets.")
+        st.stop()
+    return create_client(url, key)
+
+@st.cache_resource
+def get_sb() -> Client:
+    return _sb_client()
+
+def sb_upsert_lobby(code: str) -> Optional[str]:
+    sb = get_sb()
+    code = code.strip().lower()
+    sb.table("lobbies").upsert({"code": code}).execute()
+    res = sb.table("lobbies").select("id").eq("code", code).single().execute()
+    return res.data["id"] if res.data else None
+
+def snapshot_state() -> dict:
+    return {
+        "bans": st.session_state.bans,
+        "picks": st.session_state.picks,
+        "gods": st.session_state.gods_picked,
+        "available_heroes": st.session_state.available_heroes,
+        "available_gods": st.session_state.available_gods,
+        "step_idx": st.session_state.step_idx,
+        "version": 1,
+    }
+
+def apply_snapshot(s: dict):
+    st.session_state.bans             = s.get("bans", [])
+    st.session_state.picks            = s.get("picks", {"P1": [], "P2": []})
+    st.session_state.gods_picked      = s.get("gods", {"P1": None, "P2": None})
+    st.session_state.available_heroes = s.get("available_heroes", st.session_state.heroes.copy())
+    st.session_state.available_gods   = s.get("available_gods", st.session_state.gods.copy())
+    st.session_state.step_idx         = s.get("step_idx", 0)
+
+def sb_save_draft(lobby_id: str):
+    sb = get_sb()
+    state = snapshot_state()
+    sb.table("drafts").upsert(
+        {"lobby_id": lobby_id, "state": state, "step_idx": state["step_idx"]},
+        on_conflict="lobby_id"
+    ).execute()
+
+def sb_load_draft(lobby_id: str) -> Optional[dict]:
+    sb = get_sb()
+    res = sb.table("drafts").select("state, updated_at, step_idx").eq("lobby_id", lobby_id).single().execute()
+    return res.data if res.data else None
+
 # -----------------------
 # Session State
 # -----------------------
@@ -281,6 +333,11 @@ def init_state():
         st.session_state._filter_classes = []
     if '_filter_affils' not in st.session_state:
         st.session_state._filter_affils = []
+    # lobby defaults
+    if 'lobby_code' not in st.session_state:
+        st.session_state.lobby_code = ""
+    if 'lobby_id' not in st.session_state:
+        st.session_state.lobby_id = None
 
 def reset_draft():
     st.session_state.available_heroes = st.session_state.heroes.copy()
@@ -294,12 +351,6 @@ def reset_draft():
 # -----------------------
 # Draft logic
 # -----------------------
-@dataclass
-class Step:
-    kind: str
-    player: str
-    label: str
-
 def apply_action(step: Step, choice: str):
     if step.kind in ('ban','pick'):
         if choice not in st.session_state.available_heroes:
@@ -369,10 +420,8 @@ def render_hero_chip(hname: str):
     col_img, col_text = st.columns([1, 3])
     with col_img:
         img_bytes = load_image_bytes(hero_image_path(hname))
-        if img_bytes:
-            st.image(img_bytes, width=48)
-        else:
-            st.image(get_placeholder_portrait(), width=48)
+        if img_bytes: st.image(img_bytes, width=48)
+        else:         st.image(get_placeholder_portrait(), width=48)
     with col_text:
         classes = ", ".join(meta.classes) if meta.classes else "—"
         affils  = ", ".join(meta.affiliations) if meta.affiliations else "—"
@@ -390,7 +439,21 @@ load_preloaded_meta()
 # Title
 st.title("Judgement: Eternal Champions Draft Tool")
 
-# ====== TOP: Current Step Interaction (moved here) ======
+# --- Poll for lobby changes (compare full state, not just step) ---
+if st.session_state.get("lobby_id"):
+    now = time.time()
+    last_poll = st.session_state.get("_last_poll_ts", 0)
+    if now - last_poll > 1.0:
+        row = sb_load_draft(st.session_state["lobby_id"])
+        st.session_state["_last_poll_ts"] = now
+        if row and row.get("state"):
+            remote_state = row["state"]
+            local_state  = snapshot_state()
+            if remote_state != local_state:
+                apply_snapshot(remote_state)
+                # UI will reflect changes automatically
+
+# ====== TOP: Current Step Interaction ======
 if st.session_state.step_idx < len(DRAFT_SEQUENCE):
     step = DRAFT_SEQUENCE[st.session_state.step_idx]
     st.header(step.label)
@@ -412,6 +475,8 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
         if confirm and choice:
             ok = apply_action(step, choice)
             if ok:
+                if st.session_state.get("lobby_id"):
+                    sb_save_draft(st.session_state["lobby_id"])
                 st.toast(f"{step.player} {step.kind}ed {choice}", icon="✅")
                 st.rerun()
     elif step.kind == 'god':
@@ -431,6 +496,8 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
                     st.session_state.available_gods = [g for g in st.session_state.gods if g not in picked]
             ok = apply_action(step, choice)
             if ok:
+                if st.session_state.get("lobby_id"):
+                    sb_save_draft(st.session_state["lobby_id"])  # <-- save god pick too
                 st.toast(f"{step.player} picked {choice}", icon="✅")
                 st.rerun()
 else:
@@ -443,6 +510,32 @@ with st.sidebar:
     enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=True)
     st.session_state._enforce_unique_gods = enforce_unique
 
+    # --- Lobby (Supabase) ---
+    st.markdown("---")
+    st.subheader("Lobby (shared)")
+    lobby_code = st.text_input("Lobby code", value=st.session_state.get("lobby_code", ""))
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Join / Create"):
+            if lobby_code.strip():
+                lobby_id = sb_upsert_lobby(lobby_code)
+                if lobby_id:
+                    st.session_state["lobby_code"] = lobby_code.strip().lower()
+                    st.session_state["lobby_id"] = lobby_id
+                    row = sb_load_draft(lobby_id)
+                    if row and row.get("state"):
+                        apply_snapshot(row["state"])
+                    else:
+                        sb_save_draft(lobby_id)
+                    st.toast("Lobby ready.", icon="🟢")
+                    st.rerun()
+    with c2:
+        if st.button("Save now"):
+            if st.session_state.get("lobby_id"):
+                sb_save_draft(st.session_state["lobby_id"])
+                st.toast("Saved to lobby.", icon="💾")
+
     st.markdown("---")
     st.subheader("Filters")
     sel_classes = st.multiselect("Classes", options=ALL_CLASSES, default=st.session_state._filter_classes)
@@ -454,9 +547,15 @@ with st.sidebar:
     st.subheader("Actions")
     colA, colB = st.columns(2)
     with colA:
-        if st.button("↩️ Undo"): undo_last()
+        if st.button("↩️ Undo"):
+            undo_last()
+            if st.session_state.get("lobby_id"):
+                sb_save_draft(st.session_state["lobby_id"])
     with colB:
-        if st.button("♻️ Full Reset"): reset_draft()
+        if st.button("♻️ Full Reset"):
+            reset_draft()
+            if st.session_state.get("lobby_id"):
+                sb_save_draft(st.session_state["lobby_id"])
 
     st.markdown("---")
     st.subheader("Export")
@@ -478,7 +577,8 @@ with mid:
     st.subheader("Player 1")
     st.markdown("**Picks**")
     if st.session_state.picks['P1']:
-        for h in st.session_state.picks['P1']: render_hero_chip(h)
+        for h in st.session_state.picks['P1']:
+            render_hero_chip(h)
     else:
         st.write("—")
     st.markdown("**God**")
@@ -496,7 +596,8 @@ with right:
     st.subheader("Player 2")
     st.markdown("**Picks**")
     if st.session_state.picks['P2']:
-        for h in st.session_state.picks['P2']: render_hero_chip(h)
+        for h in st.session_state.picks['P2']:
+            render_hero_chip(h)
     else:
         st.write("—")
     st.markdown("**God**")
@@ -519,11 +620,10 @@ for i, h in enumerate(st.session_state.heroes):
     with cols[i % len(cols)]:
         b = load_image_bytes(hero_image_path(h))
         if b is None:
-            # fallback to placeholder
             st.image(get_placeholder_portrait(), use_column_width=True)
         else:
             if h in picked_or_banned:
-                gb = grayscale_bytes(b) or b  # graceful fallback
+                gb = grayscale_bytes(b) or b
                 st.image(gb, use_column_width=True)
             else:
                 st.image(b, use_column_width=True)
