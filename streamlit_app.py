@@ -658,11 +658,11 @@ with st.sidebar:
     #    st.session_state._live_sync = default_live
     #    st.session_state._live_sync_initialized = True
 
-    st.session_state._live_sync = st.checkbox(
-        "🔄 Live sync (auto refresh)",
-        value=st.session_state._live_sync,
-        help="Auto-reruns the app about once per second to pick up remote changes."
-    )
+    #st.session_state._live_sync = st.checkbox(
+    #    "🔄 Live sync (auto refresh)",
+    #    value=st.session_state._live_sync,
+    #    help="Auto-reruns the app about once per second to pick up remote changes."
+    #)
 
     st.markdown("---")
     st.subheader("Filters")
