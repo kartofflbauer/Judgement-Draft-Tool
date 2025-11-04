@@ -20,6 +20,16 @@ from PIL import Image
 from supabase import create_client, Client
 import time
 
+# --- Optional Supabase import guard ---
+HAS_SUPABASE = False  # default
+try:
+    from supabase import create_client, Client
+    HAS_SUPABASE = True
+except Exception as _e:
+    create_client = None
+    Client = None
+    SUPABASE_IMPORT_ERR = str(_e)
+
 # -----------------------
 # Defaults (edit freely)
 # -----------------------
@@ -257,6 +267,9 @@ def load_preloaded_meta():
 
 # -------- Supabase adapter --------
 def _sb_client() -> "Client":
+    if not HAS_SUPABASE:
+        st.error(f"Supabase import failed: {SUPABASE_IMPORT_ERR}")
+        st.stop()
     url = st.secrets.get("SUPABASE_URL")
     key = st.secrets.get("SUPABASE_ANON_KEY")
     if not url or not key:
