@@ -720,5 +720,5 @@ if st.session_state.step_idx >= len(DRAFT_SEQUENCE):
 # ---- Live sync auto-rerun (last line of the script) ----
 if st.session_state.get("lobby_id") and st.session_state.get("_live_sync", False):
     # Keep this modest to avoid burning CPU; 0.6–1.0s is a good range.
-    time.sleep(2.0)
+    time.sleep(0.8)  # ms
     st.experimental_rerun()
