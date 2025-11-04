@@ -286,33 +286,23 @@ def sb_upsert_lobby(code: str) -> Optional[str]:
     code = code.strip().lower()
     payload = {"code": code}
 
-    # Try proper upsert with on_conflict (best case)
+    # Try the clean upsert path first
     try:
-        # Newer clients:
-        # upsert(data, on_conflict="code", ignore_duplicates=True) also works,
-        # but we'll stick to merge semantics.
         sb.table("lobbies").upsert(payload, on_conflict="code").execute()
-    except Exception:
-        # Fallback path for client versions that don't support on_conflict on upsert
+    except Exception as e:
+        # Fallback for older clients: insert with upsert flags
         try:
-            # Try insert with upsert=True (older client signature)
             sb.table("lobbies").insert(payload, upsert=True, on_conflict="code").execute()
-        except Exception as e:
-            # As a last resort, swallow duplicate-key and proceed to select
-            # Any other error should be raised.
-            msg = str(e)
+        except Exception as e2:
+            # Swallow duplicate-key only; re-raise other errors
+            msg = f"{e}\n{e2}"
             if "duplicate key value violates unique constraint" not in msg and "23505" not in msg:
                 raise
 
-    # Fetch the lobby id no matter which path we took
-    res = sb.table("lobbies").select("id").eq("code", code).maybe_single().execute()
-    data = res.data if res and hasattr(res, "data") else None
-    if not data:
-        # Final fallback for clients without maybe_single()
-        res = sb.table("lobbies").select("id").eq("code", code).execute()
-        data = res.data[0] if res and hasattr(res, "data") and res.data else None
-
-    return data["id"] if data else None
+    # Always fetch the id explicitly (no .single()/.maybe_single())
+    res = sb.table("lobbies").select("id").eq("code", code).limit(1).execute()
+    rows = getattr(res, "data", None)
+    return rows[0]["id"] if rows and len(rows) > 0 else None
 
 def snapshot_state() -> dict:
     return {
@@ -342,16 +332,15 @@ def sb_save_draft(lobby_id: str):
     ).execute()
 
 def sb_load_draft(lobby_id: str) -> Optional[dict]:
+    """Return the draft row (dict) for a lobby_id, or None if it doesn't exist."""
     sb = get_sb()
-    q = sb.table("drafts").select("state, updated_at, step_idx").eq("lobby_id", lobby_id)
-    # Try maybe_single() if available, else fall back to list handling
-    try:
-        res = q.maybe_single().execute()   # returns None if 0 rows
-        data = res.data
-    except Exception:
-        res = q.execute()                  # returns a list (possibly empty)
-        data = res.data[0] if res.data else None
-    return data
+    res = sb.table("drafts")\
+            .select("state, updated_at, step_idx")\
+            .eq("lobby_id", lobby_id)\
+            .limit(1)\
+            .execute()
+    rows = getattr(res, "data", None)
+    return rows[0] if rows and len(rows) > 0 else None
 
 # -----------------------
 # Session State
@@ -575,8 +564,8 @@ with st.sidebar:
                         row = sb_load_draft(lobby_id)
                     if row and row.get("state"):
                         apply_snapshot(row["state"])
-                    else:
-                        sb_save_draft(lobby_id)
+                    #else:
+                    #    sb_save_draft(lobby_id)
                     st.toast("Lobby ready.", icon="🟢")
                     st.rerun()
     with c2:
