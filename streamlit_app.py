@@ -9,12 +9,13 @@ import os
 import re
 import json
 import csv
-from io import StringIO
+from io import StringIO, BytesIO
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 
 import streamlit as st
 import numpy as np
+from PIL import Image
 
 # -----------------------
 # Defaults (edit freely)
@@ -108,29 +109,18 @@ ALL_CLASSES: List[str] = []
 ALL_AFFILIATIONS: List[str] = []
 
 # -----------------------
-# Image config & helpers  (DROP-IN PATCH)
+# Image config & helpers
 # -----------------------
-import os, re
-from typing import Optional
-
 HERO_IMG_DIR = "assets/heroes"
 GOD_IMG_DIR  = "assets/gods"
 ACCEPT_EXTS  = (".png", ".jpg", ".jpeg", ".webp")
 
 # Irregular filename aliases (full stem, including the "avatar-" prefix when you want it)
 NAME_ALIASES = {
-    # exact special case you mentioned:
     "Bale & Sarna": "avatar-bale",
-    # keep any others here if needed, e.g.:
-    # "Zhim'gigrak": "avatar-zhimgigrak",  # not needed if slug removes apostrophe
 }
 
 def _slug_nopunct(name: str) -> str:
-    """
-    Lowercase, drop apostrophes and non-alphanumerics, no separators.
-    'Zhim\\'gigrak' -> 'zhimgigrak'
-    'Bale & Sarna'  -> 'balesarna'
-    """
     s = name.lower().replace("'", "")
     s = re.sub(r"[^a-z0-9]+", "", s)
     return s
@@ -143,36 +133,22 @@ def _find_image(base_dir: str, stem: str) -> Optional[str]:
     return None
 
 def hero_image_path(name: str) -> Optional[str]:
-    # If alias defined, use it verbatim (e.g., "avatar-bale")
     alias = NAME_ALIASES.get(name)
     if alias:
         p = _find_image(HERO_IMG_DIR, alias)
-        if p:
-            return p
-
-    # Default: "avatar-" + compact slug
+        if p: return p
     stem = "avatar-" + _slug_nopunct(name)
     p = _find_image(HERO_IMG_DIR, stem)
-    if p:
-        return p
-
-    # Fallbacks (just in case): try without "avatar-" and with underscores
-    alt1 = _find_image(HERO_IMG_DIR, _slug_nopunct(name))  # e.g., "haksa"
-    if alt1:
-        return alt1
-    alt2 = _find_image(HERO_IMG_DIR, "avatar_" + _slug_nopunct(name))  # just in case
-    return alt2
+    if p: return p
+    alt1 = _find_image(HERO_IMG_DIR, _slug_nopunct(name))
+    if alt1: return alt1
+    return _find_image(HERO_IMG_DIR, "avatar_" + _slug_nopunct(name))
 
 def god_image_path(name: str) -> Optional[str]:
-    # Try your convention first: "avatar-" + compact slug
-    stem = _slug_nopunct(name) + "-logo"
+    stem = "avatar-" + _slug_nopunct(name)
     p = _find_image(GOD_IMG_DIR, stem)
-    if p:
-        return p
-
-    # Fallback: plain slug (e.g., "krognar")
-    alt = _find_image(GOD_IMG_DIR, _slug_nopunct(name))
-    return alt
+    if p: return p
+    return _find_image(GOD_IMG_DIR, _slug_nopunct(name))
 
 @st.cache_data(show_spinner=False)
 def load_image_bytes(path: Optional[str]) -> Optional[bytes]:
@@ -181,6 +157,19 @@ def load_image_bytes(path: Optional[str]) -> Optional[bytes]:
     try:
         with open(path, "rb") as f:
             return f.read()
+    except Exception:
+        return None
+
+@st.cache_data(show_spinner=False)
+def grayscale_bytes(img_bytes: bytes) -> Optional[bytes]:
+    try:
+        im = Image.open(BytesIO(img_bytes)).convert("RGB")
+        gray = Image.fromarray(
+            np.stack([np.array(im.convert("L"))]*3, axis=-1).astype(np.uint8)
+        )
+        out = BytesIO()
+        gray.save(out, format="PNG")
+        return out.getvalue()
     except Exception:
         return None
 
@@ -234,24 +223,18 @@ def _split_semis(s: str) -> List[str]:
     return [x.strip() for x in s.split(';') if x.strip()]
 
 def _normalize_affils(affils: List[str]) -> List[str]:
-    """Keep 'Avatar' capitalized; expand 'ALL' to all gods; canonicalize known gods."""
     norm: List[str] = []
     for a in affils:
         a_clean = a.strip().strip('"').strip("'")
-        if not a_clean:
-            continue
+        if not a_clean: continue
         if a_clean.upper() == "ALL":
-            norm.extend(DEFAULT_GODS)
-            continue
+            norm.extend(DEFAULT_GODS); continue
         if a_clean.lower() == "avatar":
-            norm.append("Avatar")
-            continue
+            norm.append("Avatar"); continue
         for g in DEFAULT_GODS:
             if a_clean.lower() == g.lower():
-                a_clean = g
-                break
+                a_clean = g; break
         norm.append(a_clean)
-    # dedupe preserving order
     seen, out = set(), []
     for x in norm:
         if x not in seen:
@@ -259,22 +242,15 @@ def _normalize_affils(affils: List[str]) -> List[str]:
     return out
 
 def load_preloaded_meta():
-    """Parse PRELOAD_AFFILIATIONS_CSV and update HERO_DB, ALL_CLASSES, ALL_AFFILIATIONS."""
     reader = csv.DictReader(StringIO(PRELOAD_AFFILIATIONS_CSV))
     updates: Dict[str, HeroMeta] = {}
     for row in reader:
         name = (row.get("name") or "").strip()
-        if not name or name not in HERO_DB:
-            continue
-        classes_raw = (row.get("classes") or "").strip()
-        affils_raw  = (row.get("affiliations") or "").strip()
-        classes = _split_semis(classes_raw)
-        affils  = _normalize_affils(_split_semis(affils_raw))
+        if not name or name not in HERO_DB: continue
+        classes = _split_semis((row.get("classes") or "").strip())
+        affils  = _normalize_affils(_split_semis((row.get("affiliations") or "").strip()))
         updates[name] = HeroMeta(name=name, classes=classes, affiliations=affils or ["Avatar"])
-    # apply
-    for k, v in updates.items():
-        HERO_DB[k] = v
-    # recompute filters
+    for k, v in updates.items(): HERO_DB[k] = v
     global ALL_CLASSES, ALL_AFFILIATIONS
     ALL_CLASSES = sorted({c for m in HERO_DB.values() for c in m.classes})
     ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
@@ -318,8 +294,13 @@ def reset_draft():
 # -----------------------
 # Draft logic
 # -----------------------
+@dataclass
+class Step:
+    kind: str
+    player: str
+    label: str
+
 def apply_action(step: Step, choice: str):
-    # Validate
     if step.kind in ('ban','pick'):
         if choice not in st.session_state.available_heroes:
             st.toast("That hero is not available.", icon="⚠️"); return False
@@ -329,7 +310,6 @@ def apply_action(step: Step, choice: str):
         if choice not in st.session_state.available_gods:
             st.toast("That god is not available.", icon="⚠️"); return False
 
-    # Apply
     record = {'step_idx': st.session_state.step_idx, 'step': step.__dict__, 'choice': choice}
     if step.kind == 'ban':
         st.session_state.bans.append(choice)
@@ -341,9 +321,6 @@ def apply_action(step: Step, choice: str):
         st.session_state.gods_picked[step.player] = choice
         if not ALLOW_DUPLICATE_GODS:
             st.session_state.available_gods.remove(choice)
-    else:
-        st.toast("Unknown action.", icon="❓"); return False
-
     st.session_state.history.append(record)
     st.session_state.step_idx += 1
     return True
@@ -371,13 +348,6 @@ def undo_last():
     st.session_state.step_idx = record['step_idx']
 
 def export_state() -> str:
-    """
-    Clean summary of the draft:
-      - bans in order of banning
-      - each player's warband (pick order)
-      - each player's picked god
-      - remaining heroes
-    """
     all_picked = st.session_state.picks['P1'] + st.session_state.picks['P2']
     all_banned = st.session_state.bans
     remaining  = [h for h in st.session_state.heroes if h not in all_picked and h not in all_banned]
@@ -415,12 +385,61 @@ Classes: {classes}  |  Affil: {affils}""")
 # -----------------------
 st.set_page_config(page_title="Judgement: Eternal Champions Draft Tool", page_icon=None, layout="wide")
 init_state()
-load_preloaded_meta()  # ensure meta is present each run
+load_preloaded_meta()
 
+# Title
+st.title("Judgement: Eternal Champions Draft Tool")
+
+# ====== TOP: Current Step Interaction (moved here) ======
+if st.session_state.step_idx < len(DRAFT_SEQUENCE):
+    step = DRAFT_SEQUENCE[st.session_state.step_idx]
+    st.header(step.label)
+
+    # Filters affect choices
+    def hero_passes_filters(h: str) -> bool:
+        meta = HERO_DB.get(h, HeroMeta(h, [], ["Avatar"]))
+        cls_ok = True if not st.session_state._filter_classes else any(c in st.session_state._filter_classes for c in meta.classes)
+        aff_ok = True if not st.session_state._filter_affils  else any(a in st.session_state._filter_affils  for a in meta.affiliations)
+        return cls_ok and aff_ok
+
+    if step.kind in ('ban','pick'):
+        base_opts = st.session_state.available_heroes.copy()
+        options = [h for h in base_opts if hero_passes_filters(h)]
+        choice = st.selectbox("Choose a hero:", options, index=0 if options else None, key=f"select_{st.session_state.step_idx}")
+        if choice:
+            render_hero_chip(choice)
+        confirm = st.button("Confirm", type="primary")
+        if confirm and choice:
+            ok = apply_action(step, choice)
+            if ok:
+                st.toast(f"{step.player} {step.kind}ed {choice}", icon="✅")
+                st.rerun()
+    elif step.kind == 'god':
+        available_gods = st.session_state.gods.copy()
+        picked = [g for g in st.session_state.gods_picked.values() if g]
+        if st.session_state.get('_enforce_unique_gods', True):
+            available_gods = [g for g in available_gods if g not in picked]
+        choice = st.selectbox("Choose a god:", available_gods, index=0 if available_gods else None, key=f"god_{st.session_state.step_idx}")
+        if choice:
+            gbytes = load_image_bytes(god_image_path(choice))
+            if gbytes:
+                st.image(gbytes, width=64, caption=choice)
+        confirm = st.button("Confirm God", type="primary")
+        if confirm and choice:
+            if st.session_state.get('_enforce_unique_gods', True):
+                if choice not in st.session_state.available_gods:
+                    st.session_state.available_gods = [g for g in st.session_state.gods if g not in picked]
+            ok = apply_action(step, choice)
+            if ok:
+                st.toast(f"{step.player} picked {choice}", icon="✅")
+                st.rerun()
+else:
+    st.header("Draft Complete ✅")
+
+# ====== SIDEBAR ======
 with st.sidebar:
     st.header("⚙️ Setup")
     st.caption("Built-in heroes, classes, affiliations, and portraits are loaded.")
-
     enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=True)
     st.session_state._enforce_unique_gods = enforce_unique
 
@@ -444,22 +463,22 @@ with st.sidebar:
     export_str = export_state()
     st.download_button("Download Draft JSON", data=export_str, file_name="draft_state.json", mime="application/json")
 
-# Header / Overview
-st.title("Judgement: Eternal Champions Draft Tool")
+st.markdown("---")
+
+# ====== MIDDLE: Panels (Sequence + Players) ======
 left, mid, right = st.columns([1.2, 1, 1])
 
 with left:
     st.subheader("Sequence")
-    for i, step in enumerate(DRAFT_SEQUENCE):
+    for i, s in enumerate(DRAFT_SEQUENCE):
         prefix = "➡️" if i == st.session_state.step_idx else "  "
-        st.write(f"{prefix} {i+1:02d}. {step.label}")
+        st.write(f"{prefix} {i+1:02d}. {s.label}")
 
 with mid:
     st.subheader("Player 1")
     st.markdown("**Picks**")
     if st.session_state.picks['P1']:
-        for h in st.session_state.picks['P1']:
-            render_hero_chip(h)
+        for h in st.session_state.picks['P1']: render_hero_chip(h)
     else:
         st.write("—")
     st.markdown("**God**")
@@ -477,8 +496,7 @@ with right:
     st.subheader("Player 2")
     st.markdown("**Picks**")
     if st.session_state.picks['P2']:
-        for h in st.session_state.picks['P2']:
-            render_hero_chip(h)
+        for h in st.session_state.picks['P2']: render_hero_chip(h)
     else:
         st.write("—")
     st.markdown("**God**")
@@ -492,76 +510,26 @@ with right:
 
 st.markdown("---")
 
-# Current Step Interaction
-if st.session_state.step_idx < len(DRAFT_SEQUENCE):
-    step = DRAFT_SEQUENCE[st.session_state.step_idx]
-    st.header(step.label)
+# ====== BOTTOM: Portrait Grid (grays out picked/banned) ======
+st.subheader("Hero Portraits")
+cols = st.columns(8, gap="small")  # tweak columns per your taste
+picked_or_banned = set(st.session_state.picks['P1'] + st.session_state.picks['P2'] + st.session_state.bans)
 
-    # Compute filtered choices for heroes
-    def hero_passes_filters(h: str) -> bool:
-        meta = HERO_DB.get(h, HeroMeta(h, [], ["Avatar"]))
-        cls_ok = True if not st.session_state._filter_classes else any(c in st.session_state._filter_classes for c in meta.classes)
-        aff_ok = True if not st.session_state._filter_affils  else any(a in st.session_state._filter_affils  for a in meta.affiliations)
-        return cls_ok and aff_ok
-
-    if step.kind in ('ban','pick'):
-        base_opts = st.session_state.available_heroes.copy()
-        options = [h for h in base_opts if hero_passes_filters(h)]
-        choice = st.selectbox("Choose a hero:", options, index=0 if options else None, key=f"select_{st.session_state.step_idx}")
-        if choice:
-            render_hero_chip(choice)
-        confirm = st.button("Confirm", type="primary")
-        if confirm and choice:
-            ok = apply_action(step, choice)
-            if ok:
-                st.toast(f"{step.player} {step.kind}ed {choice}", icon="✅")
-                st.rerun()  # advance immediately
-
-    elif step.kind == 'god':
-        available_gods = st.session_state.gods.copy()
-        picked = [g for g in st.session_state.gods_picked.values() if g]
-        if st.session_state.get('_enforce_unique_gods', True):
-            available_gods = [g for g in available_gods if g not in picked]
-        choice = st.selectbox("Choose a god:", available_gods, index=0 if available_gods else None, key=f"god_{st.session_state.step_idx}")
-        if choice:
-            gbytes = load_image_bytes(god_image_path(choice))
-            if gbytes:
-                st.image(gbytes, width=64, caption=choice)
-        confirm = st.button("Confirm God", type="primary")
-        if confirm and choice:
-            if st.session_state.get('_enforce_unique_gods', True):
-                if choice not in st.session_state.available_gods:
-                    st.session_state.available_gods = [g for g in st.session_state.gods if g not in picked]
-            ok = apply_action(step, choice)
-            if ok:
-                st.toast(f"{step.player} picked {choice}", icon="✅")
-                st.rerun()
-else:
-    st.header("Draft Complete ✅")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Player 1 Roster")
-        for h in st.session_state.picks['P1']: render_hero_chip(h)
-        st.markdown("**God**")
-        g1 = st.session_state.gods_picked['P1']
-        if g1:
-            gbytes = load_image_bytes(god_image_path(g1))
-            if gbytes: st.image(gbytes, width=64, caption=g1)
-            else:      st.write(g1)
+for i, h in enumerate(st.session_state.heroes):
+    with cols[i % len(cols)]:
+        b = load_image_bytes(hero_image_path(h))
+        if b is None:
+            # fallback to placeholder
+            st.image(get_placeholder_portrait(), use_column_width=True)
         else:
-            st.write("—")
-    with col2:
-        st.subheader("Player 2 Roster")
-        for h in st.session_state.picks['P2']: render_hero_chip(h)
-        st.markdown("**God**")
-        g2 = st.session_state.gods_picked['P2']
-        if g2:
-            gbytes = load_image_bytes(god_image_path(g2))
-            if gbytes: st.image(gbytes, width=64, caption=g2)
-            else:      st.write(g2)
-        else:
-            st.write("—")
+            if h in picked_or_banned:
+                gb = grayscale_bytes(b) or b  # graceful fallback
+                st.image(gb, use_column_width=True)
+            else:
+                st.image(b, use_column_width=True)
 
+# Final summary when complete
+if st.session_state.step_idx >= len(DRAFT_SEQUENCE):
     st.markdown("---")
     st.subheader("Summary JSON")
     st.code(export_state(), language='json')
