@@ -278,6 +278,27 @@ def _sb_client() -> "Client":
         st.stop()
     return create_client(url, key)
 
+def sync_now():
+    """Manually pull latest state from the lobby and refresh UI."""
+    if not st.session_state.get("lobby_id"):
+        st.toast("Join a lobby to sync.", icon="ℹ️")
+        return
+    row = sb_load_draft(st.session_state["lobby_id"])
+    if row and row.get("state"):
+        remote = row["state"]
+        local  = snapshot_state()
+        if remote != local:
+            apply_snapshot(remote)
+            st.toast("Synced latest from lobby.", icon="🔄")
+        else:
+            st.toast("Already up to date.", icon="✅")
+    else:
+        # No row yet — seed the draft from current local state
+        sb_save_draft(st.session_state["lobby_id"])
+        st.toast("Created draft for this lobby.", icon="🆕")
+    st.rerun()
+
+
 @st.cache_resource
 def get_sb() -> Client:
     return _sb_client()
@@ -376,8 +397,8 @@ def init_state():
         st.session_state.lobby_id = None
     if 'role' not in st.session_state:
         st.session_state.role = 'master'      # 'master' | 'p1' | 'p2'
-    if '_live_sync' not in st.session_state:
-        st.session_state._live_sync = False   # off until a lobby is joined
+    #f '_live_sync' not in st.session_state:
+    #   st.session_state._live_sync = False   # off until a lobby is joined
 
 def reset_draft():
     st.session_state.available_heroes = st.session_state.heroes.copy()
@@ -480,8 +501,8 @@ load_preloaded_meta()
 st.title("Judgement: Eternal Champions Draft Tool")
 
 role_label = {"master":"Master", "p1":"Player 1", "p2":"Player 2"}[st.session_state.role]
-sync_label = "ON" if st.session_state.get("_live_sync") else "OFF"
-st.caption(f"Role: **{role_label}** • Live sync: **{sync_label}**")
+#ync_label = "ON" if st.session_state.get("_live_sync") else "OFF"
+st.caption(f"Role: **{role_label}**") # • Live sync: **{sync_label}**")
 
 # --- Poll for lobby changes (compare full state, not just step) ---
 if st.session_state.get("lobby_id"):
@@ -526,7 +547,15 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
         choice = st.selectbox("Choose a hero:", options, index=0 if options else None, key=f"select_{st.session_state.step_idx}")
         if choice:
             render_hero_chip(choice)
-        confirm = st.button("Confirm", type="primary", disabled=not can_act)
+        col_ok, col_sync = st.columns([1, 1])
+        with col_ok:
+            confirm = st.button("Confirm", type="primary", disabled=not can_act, key=f"ok_{st.session_state.step_idx}")
+        with col_sync:
+            sync_btn = st.button("Sync", key=f"sync_{st.session_state.step_idx}")
+        
+        if sync_btn:
+            sync_now()
+        
         if confirm and choice:
             ok = apply_action(step, choice)
             if ok:
@@ -534,6 +563,8 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
                     sb_save_draft(st.session_state["lobby_id"])
                 st.toast(f"{step.player} {step.kind}ed {choice}", icon="✅")
                 st.rerun()
+        
+        
     elif step.kind == 'god':
         available_gods = st.session_state.gods.copy()
         picked = [g for g in st.session_state.gods_picked.values() if g]
@@ -544,17 +575,27 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
             gbytes = load_image_bytes(god_image_path(choice))
             if gbytes:
                 st.image(gbytes, width=64, caption=choice)
-        confirm = st.button("Confirm God", type="primary", disabled=not can_act)
+        col_ok, col_sync = st.columns([1, 1])
+        with col_ok:
+            confirm = st.button("Confirm God", type="primary", disabled=not can_act, key=f"okgod_{st.session_state.step_idx}")
+        with col_sync:
+            sync_btn = st.button("Sync", key=f"syncgod_{st.session_state.step_idx}")
+            
+        if sync_btn:
+            sync_now()
+            
         if confirm and choice:
             if st.session_state.get('_enforce_unique_gods', True):
                 if choice not in st.session_state.available_gods:
+                    picked = [g for g in st.session_state.gods_picked.values() if g]
                     st.session_state.available_gods = [g for g in st.session_state.gods if g not in picked]
             ok = apply_action(step, choice)
             if ok:
                 if st.session_state.get("lobby_id"):
-                    sb_save_draft(st.session_state["lobby_id"])  # <-- save god pick too
+                    sb_save_draft(st.session_state["lobby_id"])
                 st.toast(f"{step.player} picked {choice}", icon="✅")
                 st.rerun()
+
 else:
     st.header("Draft Complete ✅")
 
@@ -594,6 +635,10 @@ with st.sidebar:
                 sb_save_draft(st.session_state["lobby_id"])
                 st.toast("Saved to lobby.", icon="💾")
 
+        # Add a simple manual sync
+        if st.button("Sync now"):
+            sync_now()
+
     # --- Role & Live sync ---
     st.markdown("---")
     st.subheader("Role & Sync")
@@ -608,10 +653,10 @@ with st.sidebar:
 
     # Live sync makes the app auto-rerun (poll & refresh) ~every 0.8s
     # Safe default: turn on automatically once you join a lobby
-    default_live = bool(st.session_state.get("lobby_id"))
-    if "_live_sync_initialized" not in st.session_state:
-        st.session_state._live_sync = default_live
-        st.session_state._live_sync_initialized = True
+    #default_live = bool(st.session_state.get("lobby_id"))
+    #if "_live_sync_initialized" not in st.session_state:
+    #    st.session_state._live_sync = default_live
+    #    st.session_state._live_sync_initialized = True
 
     st.session_state._live_sync = st.checkbox(
         "🔄 Live sync (auto refresh)",
@@ -718,7 +763,9 @@ if st.session_state.step_idx >= len(DRAFT_SEQUENCE):
     st.code(export_state(), language='json')
 
 # ---- Live sync auto-rerun (last line of the script) ----
-if st.session_state.get("lobby_id") and st.session_state.get("_live_sync", False):
+#f st.session_state.get("lobby_id") and st.session_state.get("_live_sync", False):
     # Keep this modest to avoid burning CPU; 0.6–1.0s is a good range.
-    time.sleep(0.8)  # ms
-    st.experimental_rerun()
+ #  time.sleep(0.8)  # ms
+  # st.experimental_rerun()
+
+## currently disabled
