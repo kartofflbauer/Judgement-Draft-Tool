@@ -21,7 +21,7 @@ from PIL import Image
 # Defaults (edit freely)
 # -----------------------
 DEFAULT_HEROES = [
-    "Abothas","Allandir","Aria","Asbrand","Aschell","Bale & Sarna","Barnascus","Bastian","Brok","Carva",
+    "Abhothas","Allandir","Aria","Asbrand","Aschell","Bale & Sarna","Barnascus","Bastian","Brok","Carva",
     "Cradol","Doenregar","Drelgoth","Fazeal","Gendris","Grael","Haksa","Isabel","Istariel","Jaegar",
     "Kain","Kogan","Kruul","Kvarto","Loribela","Lugdrug","Maltique","Marcus","Masuzi","Naias",
     "Nephenee","Onkura","Piper","Rakkir","Ramona","Ravenos","Saiyin","Sharn","Skoll","Skye",
@@ -37,7 +37,7 @@ ALLOW_DUPLICATE_GODS = False
 # Preloaded CSV (classes & affiliations) — canonicalized
 # -----------------------
 PRELOAD_AFFILIATIONS_CSV = """name,classes,affiliations
-Abothas,"Controller;Shooter","Krognar;Torin"
+Abhothas,"Controller;Shooter","Krognar;Torin"
 Allandir,"Shooter","Ista;Torin"
 Aria,"Controller;Shooter","Grul;Torin"
 Asbrand,"Enhancer;Tank","Bruelin;Avatar"
