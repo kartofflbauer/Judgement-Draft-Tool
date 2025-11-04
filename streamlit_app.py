@@ -317,8 +317,15 @@ def sb_save_draft(lobby_id: str):
 
 def sb_load_draft(lobby_id: str) -> Optional[dict]:
     sb = get_sb()
-    res = sb.table("drafts").select("state, updated_at, step_idx").eq("lobby_id", lobby_id).single().execute()
-    return res.data if res.data else None
+    q = sb.table("drafts").select("state, updated_at, step_idx").eq("lobby_id", lobby_id)
+    # Try maybe_single() if available, else fall back to list handling
+    try:
+        res = q.maybe_single().execute()   # returns None if 0 rows
+        data = res.data
+    except Exception:
+        res = q.execute()                  # returns a list (possibly empty)
+        data = res.data[0] if res.data else None
+    return data
 
 # -----------------------
 # Session State
@@ -537,6 +544,9 @@ with st.sidebar:
                     st.session_state["lobby_code"] = lobby_code.strip().lower()
                     st.session_state["lobby_id"] = lobby_id
                     row = sb_load_draft(lobby_id)
+                    if not row:
+                        sb_save_draft(lobby_id)
+                        row = sb_load_draft(lobby_id)
                     if row and row.get("state"):
                         apply_snapshot(row["state"])
                     else:
