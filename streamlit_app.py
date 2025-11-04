@@ -145,7 +145,7 @@ def hero_image_path(name: str) -> Optional[str]:
     return _find_image(HERO_IMG_DIR, "avatar_" + _slug_nopunct(name))
 
 def god_image_path(name: str) -> Optional[str]:
-    stem = "avatar-" + _slug_nopunct(name)
+    stem = _slug_nopunct(name) + "-logo"
     p = _find_image(GOD_IMG_DIR, stem)
     if p: return p
     return _find_image(GOD_IMG_DIR, _slug_nopunct(name))
