@@ -108,22 +108,31 @@ ALL_CLASSES: List[str] = []
 ALL_AFFILIATIONS: List[str] = []
 
 # -----------------------
-# Image config & helpers
+# Image config & helpers  (DROP-IN PATCH)
 # -----------------------
+import os, re
+from typing import Optional
+
 HERO_IMG_DIR = "assets/heroes"
 GOD_IMG_DIR  = "assets/gods"
 ACCEPT_EXTS  = (".png", ".jpg", ".jpeg", ".webp")
 
-# Irregular filename aliases
+# Irregular filename aliases (full stem, including the "avatar-" prefix when you want it)
 NAME_ALIASES = {
-    "Bale & Sarna": "bale_and_sarna",
-    "Zhim'gigrak": "zhimgigrak",
+    # exact special case you mentioned:
+    "Bale & Sarna": "avatar-bale",
+    # keep any others here if needed, e.g.:
+    # "Zhim'gigrak": "avatar-zhimgigrak",  # not needed if slug removes apostrophe
 }
 
-def _slug(name: str) -> str:
-    s = name.lower()
-    s = s.replace("&", "and").replace("'", "")
-    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+def _slug_nopunct(name: str) -> str:
+    """
+    Lowercase, drop apostrophes and non-alphanumerics, no separators.
+    'Zhim\\'gigrak' -> 'zhimgigrak'
+    'Bale & Sarna'  -> 'balesarna'
+    """
+    s = name.lower().replace("'", "")
+    s = re.sub(r"[^a-z0-9]+", "", s)
     return s
 
 def _find_image(base_dir: str, stem: str) -> Optional[str]:
@@ -134,12 +143,36 @@ def _find_image(base_dir: str, stem: str) -> Optional[str]:
     return None
 
 def hero_image_path(name: str) -> Optional[str]:
-    stem = NAME_ALIASES.get(name) or _slug(name)
-    return _find_image(HERO_IMG_DIR, stem)
+    # If alias defined, use it verbatim (e.g., "avatar-bale")
+    alias = NAME_ALIASES.get(name)
+    if alias:
+        p = _find_image(HERO_IMG_DIR, alias)
+        if p:
+            return p
+
+    # Default: "avatar-" + compact slug
+    stem = "avatar-" + _slug_nopunct(name)
+    p = _find_image(HERO_IMG_DIR, stem)
+    if p:
+        return p
+
+    # Fallbacks (just in case): try without "avatar-" and with underscores
+    alt1 = _find_image(HERO_IMG_DIR, _slug_nopunct(name))  # e.g., "haksa"
+    if alt1:
+        return alt1
+    alt2 = _find_image(HERO_IMG_DIR, "avatar_" + _slug_nopunct(name))  # just in case
+    return alt2
 
 def god_image_path(name: str) -> Optional[str]:
-    stem = _slug(name)
-    return _find_image(GOD_IMG_DIR, stem)
+    # Try your convention first: "avatar-" + compact slug
+    stem = _slug_nopunct(name) + "-logo"
+    p = _find_image(GOD_IMG_DIR, stem)
+    if p:
+        return p
+
+    # Fallback: plain slug (e.g., "krognar")
+    alt = _find_image(GOD_IMG_DIR, _slug_nopunct(name))
+    return alt
 
 @st.cache_data(show_spinner=False)
 def load_image_bytes(path: Optional[str]) -> Optional[bytes]:
