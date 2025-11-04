@@ -9,6 +9,7 @@ import os
 import re
 import json
 import csv
+import uuid
 from io import StringIO, BytesIO
 from dataclasses import dataclass
 from typing import List, Dict, Optional
@@ -19,6 +20,8 @@ from PIL import Image
 
 from supabase import create_client, Client
 import time
+
+from streamlit_extras.app_autorefresh import st_autorefresh
 
 # --- Optional Supabase import guard ---
 HAS_SUPABASE = False  # default
@@ -373,6 +376,10 @@ def init_state():
         st.session_state.lobby_code = ""
     if 'lobby_id' not in st.session_state:
         st.session_state.lobby_id = None
+    if 'role' not in st.session_state:
+        st.session_state.role = 'master'      # 'master' | 'p1' | 'p2'
+    if '_live_sync' not in st.session_state:
+        st.session_state._live_sync = False   # off until a lobby is joined
 
 def reset_draft():
     st.session_state.available_heroes = st.session_state.heroes.copy()
@@ -474,6 +481,10 @@ load_preloaded_meta()
 # Title
 st.title("Judgement: Eternal Champions Draft Tool")
 
+role_label = {"master":"Master", "p1":"Player 1", "p2":"Player 2"}[st.session_state.role]
+sync_label = "ON" if st.session_state.get("_live_sync") else "OFF"
+st.caption(f"Role: **{role_label}** • Live sync: **{sync_label}**")
+
 # --- Poll for lobby changes (compare full state, not just step) ---
 if st.session_state.get("lobby_id"):
     now = time.time()
@@ -488,9 +499,20 @@ if st.session_state.get("lobby_id"):
                 apply_snapshot(remote_state)
                 # UI will reflect changes automatically
 
+def _can_act_this_turn(step_player: str) -> bool:
+    role = st.session_state.get("role", "master")
+    if role == "master":
+        return True
+    return (role == "p1" and step_player == "P1") or (role == "p2" and step_player == "P2")
+
 # ====== TOP: Current Step Interaction ======
 if st.session_state.step_idx < len(DRAFT_SEQUENCE):
     step = DRAFT_SEQUENCE[st.session_state.step_idx]
+    can_act = _can_act_this_turn(step.player)
+    if not can_act:
+        human = {"P1":"Player 1", "P2":"Player 2"}[step.player]
+        st.info(f"It's {human}'s turn. Your role is **{st.session_state.role.upper()}**.")
+
     st.header(step.label)
 
     # Filters affect choices
@@ -506,7 +528,7 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
         choice = st.selectbox("Choose a hero:", options, index=0 if options else None, key=f"select_{st.session_state.step_idx}")
         if choice:
             render_hero_chip(choice)
-        confirm = st.button("Confirm", type="primary")
+        confirm = st.button("Confirm", type="primary", disabled=not can_act)
         if confirm and choice:
             ok = apply_action(step, choice)
             if ok:
@@ -524,7 +546,7 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
             gbytes = load_image_bytes(god_image_path(choice))
             if gbytes:
                 st.image(gbytes, width=64, caption=choice)
-        confirm = st.button("Confirm God", type="primary")
+        confirm = st.button("Confirm God", type="primary", disabled=not can_act)
         if confirm and choice:
             if st.session_state.get('_enforce_unique_gods', True):
                 if choice not in st.session_state.available_gods:
@@ -573,6 +595,31 @@ with st.sidebar:
             if st.session_state.get("lobby_id"):
                 sb_save_draft(st.session_state["lobby_id"])
                 st.toast("Saved to lobby.", icon="💾")
+
+    # --- Role & Live sync ---
+    st.markdown("---")
+    st.subheader("Role & Sync")
+
+    st.session_state.role = st.radio(
+        "Who are you?",
+        options=["master", "p1", "p2"],
+        format_func=lambda x: {"master":"Master (both sides)", "p1":"Player 1", "p2":"Player 2"}[x],
+        horizontal=False,
+        index=["master","p1","p2"].index(st.session_state.role)
+    )
+
+    # Live sync makes the app auto-rerun (poll & refresh) ~every 0.8s
+    # Safe default: turn on automatically once you join a lobby
+    default_live = bool(st.session_state.get("lobby_id"))
+    if "_live_sync_initialized" not in st.session_state:
+        st.session_state._live_sync = default_live
+        st.session_state._live_sync_initialized = True
+
+    st.session_state._live_sync = st.checkbox(
+        "🔄 Live sync (auto refresh)",
+        value=st.session_state._live_sync,
+        help="Auto-reruns the app about once per second to pick up remote changes."
+    )
 
     st.markdown("---")
     st.subheader("Filters")
@@ -671,3 +718,9 @@ if st.session_state.step_idx >= len(DRAFT_SEQUENCE):
     st.markdown("---")
     st.subheader("Summary JSON")
     st.code(export_state(), language='json')
+
+# ---- Live sync auto-rerun (last line of the script) ----
+if st.session_state.get("lobby_id") and st.session_state.get("_live_sync", False):
+    # Keep this modest to avoid burning CPU; 0.6–1.0s is a good range.
+    time.sleep(0.8)
+    st.experimental_rerun()
