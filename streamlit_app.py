@@ -256,7 +256,7 @@ def load_preloaded_meta():
     ALL_AFFILIATIONS = sorted({a for m in HERO_DB.values() for a in m.affiliations})
 
 # -------- Supabase adapter --------
-def _sb_client() -> Client:
+def _sb_client() -> "Client":
     url = st.secrets.get("SUPABASE_URL")
     key = st.secrets.get("SUPABASE_ANON_KEY")
     if not url or not key:
