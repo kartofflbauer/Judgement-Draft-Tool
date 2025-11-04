@@ -284,9 +284,35 @@ def get_sb() -> Client:
 def sb_upsert_lobby(code: str) -> Optional[str]:
     sb = get_sb()
     code = code.strip().lower()
-    sb.table("lobbies").upsert({"code": code}).execute()
-    res = sb.table("lobbies").select("id").eq("code", code).single().execute()
-    return res.data["id"] if res.data else None
+    payload = {"code": code}
+
+    # Try proper upsert with on_conflict (best case)
+    try:
+        # Newer clients:
+        # upsert(data, on_conflict="code", ignore_duplicates=True) also works,
+        # but we'll stick to merge semantics.
+        sb.table("lobbies").upsert(payload, on_conflict="code").execute()
+    except Exception:
+        # Fallback path for client versions that don't support on_conflict on upsert
+        try:
+            # Try insert with upsert=True (older client signature)
+            sb.table("lobbies").insert(payload, upsert=True, on_conflict="code").execute()
+        except Exception as e:
+            # As a last resort, swallow duplicate-key and proceed to select
+            # Any other error should be raised.
+            msg = str(e)
+            if "duplicate key value violates unique constraint" not in msg and "23505" not in msg:
+                raise
+
+    # Fetch the lobby id no matter which path we took
+    res = sb.table("lobbies").select("id").eq("code", code).maybe_single().execute()
+    data = res.data if res and hasattr(res, "data") else None
+    if not data:
+        # Final fallback for clients without maybe_single()
+        res = sb.table("lobbies").select("id").eq("code", code).execute()
+        data = res.data[0] if res and hasattr(res, "data") and res.data else None
+
+    return data["id"] if data else None
 
 def snapshot_state() -> dict:
     return {
@@ -643,13 +669,13 @@ for i, h in enumerate(st.session_state.heroes):
     with cols[i % len(cols)]:
         b = load_image_bytes(hero_image_path(h))
         if b is None:
-            st.image(get_placeholder_portrait(), use_column_width=True)
+            st.image(get_placeholder_portrait(), use_container_width=True)
         else:
             if h in picked_or_banned:
                 gb = grayscale_bytes(b) or b
-                st.image(gb, use_column_width=True)
+                st.image(gb, use_container_width=True)
             else:
-                st.image(b, use_column_width=True)
+                st.image(b, use_container_width=True)
 
 # Final summary when complete
 if st.session_state.step_idx >= len(DRAFT_SEQUENCE):
