@@ -667,6 +667,7 @@ with st.sidebar:
     st.header("⚙️ Setup")
     st.caption("Built-in heroes, classes, affiliations, and portraits are loaded.")
     enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=True)
+    st.session_state._enforce_unique_gods = enforce_unique
         # --- Fearless BO3 toggle ---
     st.markdown("---")
     st.subheader("Series Mode")
@@ -680,7 +681,6 @@ with st.sidebar:
     if st.session_state.fearless_bo3:
         st.caption(f"Game {st.session_state.series_game} of 3 • Series bans: {len(st.session_state.series_banned)}")
 
-    st.session_state._enforce_unique_gods = enforce_unique
 
     # --- Lobby (Supabase) ---
     st.markdown("---")
