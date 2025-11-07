@@ -666,14 +666,21 @@ else:
 with st.sidebar:
     st.header("⚙️ Setup")
     st.caption("Built-in heroes, classes, affiliations, and portraits are loaded.")
-    enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=True)
+
+    enforce_unique = st.checkbox(
+        "Enforce unique gods (no duplicates)",
+        value=True,
+        key="chk_unique_gods",
+    )
     st.session_state._enforce_unique_gods = enforce_unique
-        # --- Fearless BO3 toggle ---
+
+    # --- Fearless BO3 toggle ---
     st.markdown("---")
     st.subheader("Series Mode")
     st.session_state.fearless_bo3 = st.checkbox(
         "Fearless BO3",
         value=st.session_state.fearless_bo3,
+        key="chk_fearless_bo3",
         help="Play a best-of-3 series where any hero picked in a game is automatically banned for the remainder of the series."
     )
 
@@ -681,15 +688,18 @@ with st.sidebar:
     if st.session_state.fearless_bo3:
         st.caption(f"Game {st.session_state.series_game} of 3 • Series bans: {len(st.session_state.series_banned)}")
 
-
     # --- Lobby (Supabase) ---
     st.markdown("---")
     st.subheader("Lobby (shared)")
-    lobby_code = st.text_input("Lobby code", value=st.session_state.get("lobby_code", ""))
+    lobby_code = st.text_input(
+        "Lobby code",
+        value=st.session_state.get("lobby_code", ""),
+        key="inp_lobby_code",
+    )
 
-    c1, c2, colB = st.columns(3)
+    c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("Join / Create"):
+        if st.button("Join / Create", key="btn_join_create"):
             if lobby_code.strip():
                 lobby_id = sb_upsert_lobby(lobby_code)
                 if lobby_id:
@@ -701,30 +711,29 @@ with st.sidebar:
                         row = sb_load_draft(lobby_id)
                     if row and row.get("state"):
                         apply_snapshot(row["state"])
-                    #else:
-                    #    sb_save_draft(lobby_id)
                     st.toast("Lobby ready.", icon="🟢")
                     st.rerun()
+
     with c2:
-        if st.button("Save now"):
+        if st.button("Save now", key="btn_save_now"):
             if st.session_state.get("lobby_id"):
                 sb_save_draft(st.session_state["lobby_id"])
                 st.toast("Saved to lobby.", icon="💾")
 
-        # Add a simple manual sync
-        if st.button("Sync now"):
+        if st.button("Sync now", key="btn_sync_now"):
             sync_now()
-    with colB:
-        if st.button("♻️ Full Reset"):  # full reset (series as well)
+
+    with c3:
+        if st.button("♻️ Full Reset", key="btn_full_reset_series"):
             reset_draft()
-            st.session_state.fearless_bo3 = st.session_state.fearless_bo3  # no-op, keep toggle state
+            # keep current toggle state (no-op here, but harmless)
             st.session_state.series_game = 1
             st.session_state.series_banned = set()
             if st.session_state.get("lobby_id"):
                 sb_save_draft(st.session_state["lobby_id"])
 
     # Optional: reset only the current game (preserve series bans)
-    if st.session_state.fearless_bo3 and st.button("↺ Reset Current Game"):
+    if st.session_state.fearless_bo3 and st.button("↺ Reset Current Game", key="btn_reset_current_game"):
         reset_game_from_series()
         if st.session_state.get("lobby_id"):
             sb_save_draft(st.session_state["lobby_id"])
