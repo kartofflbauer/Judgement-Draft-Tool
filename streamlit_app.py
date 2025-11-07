@@ -687,7 +687,7 @@ with st.sidebar:
     st.subheader("Lobby (shared)")
     lobby_code = st.text_input("Lobby code", value=st.session_state.get("lobby_code", ""))
 
-    c1, c2 = st.columns(2)
+    c1, c2, colB = st.columns(3)
     with c1:
         if st.button("Join / Create"):
             if lobby_code.strip():
