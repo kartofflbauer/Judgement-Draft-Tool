@@ -334,16 +334,26 @@ def snapshot_state() -> dict:
         "available_heroes": st.session_state.available_heroes,
         "available_gods": st.session_state.available_gods,
         "step_idx": st.session_state.step_idx,
+        # Fearless BO3
+        "fearless_bo3": st.session_state.fearless_bo3,
+        "series_game": st.session_state.series_game,
+        "series_banned": sorted(list(st.session_state.series_banned)),
         "version": 1,
     }
 
+
 def apply_snapshot(s: dict):
-    st.session_state.bans             = s.get("bans", [])
-    st.session_state.picks            = s.get("picks", {"P1": [], "P2": []})
-    st.session_state.gods_picked      = s.get("gods", {"P1": None, "P2": None})
-    st.session_state.available_heroes = s.get("available_heroes", st.session_state.heroes.copy())
-    st.session_state.available_gods   = s.get("available_gods", st.session_state.gods.copy())
-    st.session_state.step_idx         = s.get("step_idx", 0)
+    st.session_state.bans              = s.get("bans", [])
+    st.session_state.picks             = s.get("picks", {"P1": [], "P2": []})
+    st.session_state.gods_picked       = s.get("gods", {"P1": None, "P2": None})
+    st.session_state.available_heroes  = s.get("available_heroes", st.session_state.heroes.copy())
+    st.session_state.available_gods    = s.get("available_gods", st.session_state.gods.copy())
+    st.session_state.step_idx          = s.get("step_idx", 0)
+    # Fearless BO3
+    st.session_state.fearless_bo3      = bool(s.get("fearless_bo3", False))
+    st.session_state.series_game       = int(s.get("series_game", 1))
+    st.session_state.series_banned     = set(s.get("series_banned", []))
+
 
 def sb_save_draft(lobby_id: str):
     sb = get_sb()
@@ -399,6 +409,14 @@ def init_state():
         st.session_state.role = 'master'      # 'master' | 'p1' | 'p2'
     #f '_live_sync' not in st.session_state:
     #   st.session_state._live_sync = False   # off until a lobby is joined
+        # --- Fearless BO3 defaults ---
+    if 'fearless_bo3' not in st.session_state:
+        st.session_state.fearless_bo3 = False  # toggle in sidebar
+    if 'series_game' not in st.session_state:
+        st.session_state.series_game = 1       # 1..3
+    if 'series_banned' not in st.session_state:
+        st.session_state.series_banned = set() # heroes auto-banned from prior games
+
 
 def reset_draft():
     st.session_state.available_heroes = st.session_state.heroes.copy()
@@ -459,6 +477,34 @@ def undo_last():
             st.session_state.available_gods.append(choice); st.session_state.available_gods.sort()
     st.session_state.step_idx = record['step_idx']
 
+def _recompute_available_from_bans():
+    st.session_state.available_heroes = [h for h in st.session_state.heroes if h not in st.session_state.bans]
+
+def reset_game_from_series():
+    """Reset only the current game, preserving Fearless series bans."""
+    st.session_state.bans = sorted(list(st.session_state.series_banned)) if st.session_state.fearless_bo3 else []
+    _recompute_available_from_bans()
+    st.session_state.available_gods   = st.session_state.gods.copy()
+    st.session_state.picks            = {'P1': [], 'P2': []}
+    st.session_state.gods_picked      = {'P1': None, 'P2': None}
+    st.session_state.step_idx         = 0
+    st.session_state.history          = []
+
+def start_series_if_needed():
+    """If Fearless is on and we're at game 1, ensure game state respects series bans."""
+    if st.session_state.fearless_bo3 and st.session_state.series_game == 1 and not st.session_state.history:
+        # initial game: no series bans yet, but ensure structure is sound
+        reset_game_from_series()
+
+def advance_to_next_game():
+    """Move to the next game in a Fearless BO3: add current picks to series bans and reset game."""
+    # add both teams' picks to the running banlist
+    new_bans = set(st.session_state.picks['P1'] + st.session_state.picks['P2'])
+    st.session_state.series_banned |= new_bans
+    st.session_state.series_game += 1
+    reset_game_from_series()
+
+
 def export_state() -> str:
     all_picked = st.session_state.picks['P1'] + st.session_state.picks['P2']
     all_banned = st.session_state.bans
@@ -469,7 +515,11 @@ def export_state() -> str:
         "god_P1": st.session_state.gods_picked.get('P1'),
         "warband_P2": st.session_state.picks['P2'],
         "god_P2": st.session_state.gods_picked.get('P2'),
-        "remaining_heroes": remaining
+        "remaining_heroes": remaining,
+        # Fearless BO3
+        "fearless_bo3": st.session_state.fearless_bo3,
+        "series_game": st.session_state.series_game,
+        "series_banned": sorted(list(st.session_state.series_banned)),
     }
     return json.dumps(summary, indent=2)
 
@@ -499,6 +549,8 @@ load_preloaded_meta()
 
 # Title
 st.title("Judgement: Eternal Champions Draft Tool")
+
+start_series_if_needed()
 
 role_label = {"master":"Master", "p1":"Player 1", "p2":"Player 2"}[st.session_state.role]
 #ync_label = "ON" if st.session_state.get("_live_sync") else "OFF"
@@ -599,11 +651,35 @@ if st.session_state.step_idx < len(DRAFT_SEQUENCE):
 else:
     st.header("Draft Complete ✅")
 
+    # If Fearless BO3 and not at game 3, allow advancing
+    if st.session_state.fearless_bo3 and st.session_state.series_game < 3:
+        st.success(f"Game {st.session_state.series_game} complete.")
+        if st.button("➡️ Start Next Game"):
+            advance_to_next_game()
+            if st.session_state.get("lobby_id"):
+                sb_save_draft(st.session_state["lobby_id"])
+            st.rerun()
+    elif st.session_state.fearless_bo3 and st.session_state.series_game >= 3:
+        st.info("Series complete (Game 3 done). You can reset the series in the sidebar.")
+
 # ====== SIDEBAR ======
 with st.sidebar:
     st.header("⚙️ Setup")
     st.caption("Built-in heroes, classes, affiliations, and portraits are loaded.")
     enforce_unique = st.checkbox("Enforce unique gods (no duplicates)", value=True)
+        # --- Fearless BO3 toggle ---
+    st.markdown("---")
+    st.subheader("Series Mode")
+    st.session_state.fearless_bo3 = st.checkbox(
+        "Fearless BO3",
+        value=st.session_state.fearless_bo3,
+        help="Play a best-of-3 series where any hero picked in a game is automatically banned for the remainder of the series."
+    )
+
+    # Show series status when enabled
+    if st.session_state.fearless_bo3:
+        st.caption(f"Game {st.session_state.series_game} of 3 • Series bans: {len(st.session_state.series_banned)}")
+
     st.session_state._enforce_unique_gods = enforce_unique
 
     # --- Lobby (Supabase) ---
@@ -638,6 +714,21 @@ with st.sidebar:
         # Add a simple manual sync
         if st.button("Sync now"):
             sync_now()
+    with colB:
+        if st.button("♻️ Full Reset"):  # full reset (series as well)
+            reset_draft()
+            st.session_state.fearless_bo3 = st.session_state.fearless_bo3  # no-op, keep toggle state
+            st.session_state.series_game = 1
+            st.session_state.series_banned = set()
+            if st.session_state.get("lobby_id"):
+                sb_save_draft(st.session_state["lobby_id"])
+
+    # Optional: reset only the current game (preserve series bans)
+    if st.session_state.fearless_bo3 and st.button("↺ Reset Current Game"):
+        reset_game_from_series()
+        if st.session_state.get("lobby_id"):
+            sb_save_draft(st.session_state["lobby_id"])
+
 
     # --- Role & Live sync ---
     st.markdown("---")
