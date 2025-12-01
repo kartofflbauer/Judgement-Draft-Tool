@@ -36,11 +36,11 @@ except Exception as _e:
 # -----------------------
 DEFAULT_HEROES = [
     "Abhothas","Allandir","Aria","Asbrand","Aschell","Bale & Sarna","Barnascus","Bastian","Brok","Carva",
-    "Cradol","Doenregar","Drelgoth","Fazeal","Gendris","Grael","Haksa","Isabel","Istariel","Jaegar",
-    "Kain","Kogan","Kruul","Kvarto","Loribela","Lugdrug","Maltique","Marcus","Masuzi","Naias",
+    "Cradol","Doenregar","Drelgoth","Fazeal","Gendris", "Gonsoku", "Grael","Haksa","Isabel","Istariel","Jaegar",
+    "Kain","Kogan","Kruul","Kvarto","Loribela","Lugdrug", "Lyra", "Maltique","Marcus","Masuzi","Naias",
     "Nephenee","Onkura","Piper","Rakkir","Ramona","Ravenos","Saiyin","Sharn","Skoll","Skye",
     "Styx","Svetlana","Thorgar","Thrommel","Urvexis","Viktor","Xyvera","Yasmin","Yorgawth","Zaffen",
-    "Zaron","Zhim'gigrak","Zhonyja"
+    "Zaron", "Zendala", "Zhim'gigrak","Zhonyja"
 ]
 DEFAULT_GODS = ["Bruelin","Grul","Ista","Krognar","Tomas","Torin"]
 
@@ -66,6 +66,7 @@ Doenregar,"Tank","Grul;Ista"
 Drelgoth,"Bruiser","Bruelin;Grul"
 Fazeal,"Assassin;Controller","Tomas;Avatar"
 Gendris,"Controller;Shooter","Grul;Avatar"
+Gonsoku,"Bruiser;Controller","Bruelin;Ista"
 Grael,"Enhancer;Soulist","Krognar;Torin"
 Haksa,"Controller;Enhancer","Ista;Torin"
 Isabel,"Bruiser;Enhancer","Ista;Avatar"
@@ -77,6 +78,7 @@ Kruul,"Bruiser;Soulist","Bruelin;Krognar"
 Kvarto,"Bruiser;Controller","Bruelin;Krognar"
 Loribela,"Controller;Enhancer","Ista;Grul"
 Lugdrug,"Enhancer;Tank","Bruelin;Krognar"
+Lyra,"Bruiser;Controller","Tomas;Avatar"
 Maltique,"Controller;Sniper","ALL"
 Marcus,"Controller;Tank","Ista;Tomas"
 Masuzi,"Controller;Soulist","Tomas;Torin"
@@ -102,6 +104,7 @@ Yasmin,"Enhancer;Shooter","Ista;Bruelin"
 Yorgawth,"Bruiser","Grul;Krognar"
 Zaffen,"Sniper","Grul;Bruelin"
 Zaron,"Controller;Soulist","Krognar;Avatar"
+Zendala,"Assassin;Controller","Krognar;Avatar"
 Zhim'gigrak,"Controller;Shooter","Tomas;Torin"
 Zhonyja,"Assassin","Bruelin;Avatar"
 """
