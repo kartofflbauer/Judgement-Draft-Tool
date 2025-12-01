@@ -311,23 +311,15 @@ def sb_upsert_lobby(code: str) -> Optional[str]:
     code = code.strip().lower()
     payload = {"code": code}
 
-    # Try the clean upsert path first
-    try:
-        sb.table("lobbies").upsert(payload, on_conflict="code").execute()
-    except Exception as e:
-        # Fallback for older clients: insert with upsert flags
-        try:
-            sb.table("lobbies").insert(payload, upsert=True, on_conflict="code").execute()
-        except Exception as e2:
-            # Swallow duplicate-key only; re-raise other errors
-            msg = f"{e}\n{e2}"
-            if "duplicate key value violates unique constraint" not in msg and "23505" not in msg:
-                raise
+    # If lobbies table has a UNIQUE constraint on "code",
+    # this will either insert or update the existing row.
+    sb.table("lobbies").upsert(payload, on_conflict="code").execute()
 
-    # Always fetch the id explicitly (no .single()/.maybe_single())
+    # Always fetch the id explicitly (no .single/.maybe_single to avoid PGRST116)
     res = sb.table("lobbies").select("id").eq("code", code).limit(1).execute()
     rows = getattr(res, "data", None)
     return rows[0]["id"] if rows and len(rows) > 0 else None
+
 
 def snapshot_state() -> dict:
     return {
